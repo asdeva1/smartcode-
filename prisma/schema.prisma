@@ -1,0 +1,266 @@
+// SmartCode — Prisma schema
+// Source of truth: docs/02-DATABASE-DESIGN.md, docs/11-SCHEMA-DECISIONS.md
+// Phase 1 scope: full schema is defined now (per approved architecture),
+// but Phase 1 only exercises User/Role/Team — Production/Audit business
+// logic is implemented starting Phase 3/4.
+//
+// No JCD field exists anywhere in this schema. See docs/09-BUSINESS-RULES.md.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Identity & RBAC
+// ─────────────────────────────────────────────────────────────
+
+enum RoleName {
+  MANAGER
+  TEAM_LEAD
+  CODER
+  AUDITOR
+}
+
+model User {
+  id              String   @id @default(uuid())
+  employeeId      String   @unique
+  loginName       String   @unique
+  email           String   @unique
+  passwordHash    String
+  role            RoleName
+  isActive        Boolean  @default(true)
+  failedLoginCount Int     @default(0)
+  lockedUntil     DateTime?
+  lastLoginAt     DateTime?
+
+  // Reserved for future Keycloak migration — see docs/07-SECURITY-ARCHITECTURE.md.
+  // Unused by v1 native-auth logic.
+  externalId      String?
+  authProvider    String   @default("local")
+
+  createdById     String?
+  createdBy       User?    @relation("UserCreatedBy", fields: [createdById], references: [id])
+  createdUsers    User[]   @relation("UserCreatedBy")
+
+  teamId          String?
+  team            Team?    @relation("TeamMembers", fields: [teamId], references: [id])
+  leadsTeam       Team?    @relation("TeamLead")
+
+  auditorAssignments AuditorProjectAssignment[]
+  productionEntries  ProductionEntry[]           @relation("CoderProduction")
+  auditEntries       AuditEntry[]                @relation("AuditorAudits")
+  notifications      Notification[]
+  activityLogs       ActivityLog[]
+  auditLogs          AuditLog[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([loginName])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Teams, Clients, Projects
+// ─────────────────────────────────────────────────────────────
+
+model Team {
+  id          String    @id @default(uuid())
+  name        String
+  teamLeadId  String?   @unique
+  teamLead    User?     @relation("TeamLead", fields: [teamLeadId], references: [id])
+  members     User[]    @relation("TeamMembers")
+  projects    Project[]
+  createdAt   DateTime  @default(now())
+}
+
+model Client {
+  id       String    @id @default(uuid())
+  name     String
+  isActive Boolean   @default(true)
+  projects Project[]
+}
+
+model Project {
+  id       String   @id @default(uuid())
+  clientId String
+  client   Client   @relation(fields: [clientId], references: [id])
+  teamId   String?
+  team     Team?    @relation(fields: [teamId], references: [id])
+  name     String
+  isActive Boolean  @default(true)
+
+  charts               Chart[]
+  auditorAssignments   AuditorProjectAssignment[]
+}
+
+// Question 6 (docs/11-SCHEMA-DECISIONS.md) — Auditor scoped to Project(s),
+// not to individually assigned charts.
+model AuditorProjectAssignment {
+  id         String   @id @default(uuid())
+  auditorId  String
+  auditor    User     @relation(fields: [auditorId], references: [id])
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id])
+  assignedAt DateTime @default(now())
+
+  @@unique([auditorId, projectId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Chart / Production / Audit — core business relationship
+// ─────────────────────────────────────────────────────────────
+
+enum ProductionStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  REWORK
+  CANCELLED
+}
+
+enum AuditStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  REVIEW_REQUIRED
+  REJECTED
+}
+
+model Chart {
+  id              String   @id @default(uuid())
+  chartId         String   @unique
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id])
+
+  // Reserved for future formal chart-assignment workflow — see
+  // docs/11-SCHEMA-DECISIONS.md Question 5. Unused by v1 business logic
+  // (v1 uses direct Coder entry, Chart auto-created on first submission).
+  assignedCoderId String?
+  assignedById    String?
+  assignedAt      DateTime?
+
+  productionEntries ProductionEntry[]
+  createdAt         DateTime @default(now())
+
+  @@index([assignedCoderId])
+}
+
+// Versioned per docs/11-SCHEMA-DECISIONS.md Question 1 (approved):
+// a Chart may have multiple ProductionEntry versions; exactly one
+// is current at any time. Rework creates a new version rather than
+// mutating a COMPLETED record — see docs/09-BUSINESS-RULES.md.
+model ProductionEntry {
+  id         String           @id @default(uuid())
+  chartId    String
+  chart      Chart            @relation(fields: [chartId], references: [chartId])
+  coderId    String
+  coder      User             @relation("CoderProduction", fields: [coderId], references: [id])
+
+  version    Int              @default(1)
+  isCurrent  Boolean          @default(true)
+
+  pageCount  Int
+  totalDOS   Int
+  totalICDs  Int
+  status     ProductionStatus @default(PENDING)
+  remarks    String?
+  codedDate  DateTime
+
+  auditEntries AuditEntry[]
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([chartId, version])
+  @@index([coderId])
+  @@index([codedDate])
+  // NOTE: a partial unique index enforcing exactly one isCurrent=true row
+  // per chartId is added via a raw SQL migration (Postgres partial indexes
+  // are not expressible in the Prisma schema DSL) — see
+  // prisma/migrations/.../migration.sql and docs/02-DATABASE-DESIGN.md.
+}
+
+// 1:N against ProductionEntry per docs/11-SCHEMA-DECISIONS.md Question 3
+// (approved): supports re-audit without restructuring. v1 business logic
+// constrains this to one active audit per version; a second row is only
+// created after the first's status is REJECTED — enforced in the service
+// layer (see docs/09-BUSINESS-RULES.md "Audit Resolution & Re-audit").
+model AuditEntry {
+  id                String          @id @default(uuid())
+  productionEntryId String
+  productionEntry   ProductionEntry @relation(fields: [productionEntryId], references: [id])
+  chartId           String          // denormalized for direct chart-based lookup
+  auditorId         String
+  auditor           User            @relation("AuditorAudits", fields: [auditorId], references: [id])
+
+  auditErrors       Int
+  errorExceptions   Int
+  totalErrors       Int             // recomputed server-side on every write — see docs/06
+  status            AuditStatus     @default(PENDING)
+  auditDate         DateTime
+  remarks           String?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([productionEntryId])
+  @@index([chartId])
+  @@index([auditorId])
+  @@index([auditDate])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Notifications & Logging
+// ─────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  type      String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String
+  timestamp DateTime @default(now())
+
+  @@index([userId])
+  @@index([entity, entityId])
+}
+
+// Compliance-grade, append-only log — see docs/07-SECURITY-ARCHITECTURE.md.
+// No DELETE endpoint exists for this model at the application layer.
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  role      String?
+  action    String
+  entity    String
+  entityId  String?
+  before    Json?
+  after     Json?
+  ip        String?
+  userAgent String?
+  timestamp DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([action])
+  @@index([timestamp])
+}
