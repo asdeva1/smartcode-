@@ -73,7 +73,21 @@ COPY packages/types packages/types
 COPY packages/config packages/config
 COPY apps/api apps/api
 COPY prisma prisma
-RUN pnpm --filter @smartcode/api prisma:generate
+# PRISMA_GENERATE_SKIP_AUTOINSTALL=true disables a Prisma CLI convenience
+# feature (present in its own shipped source, prisma/build/index.js -
+# see this fix's accompanying report for the exact function) that tries
+# to detect whether `prisma` and `@prisma/client` are "properly
+# colocated" siblings, and if its heuristic concludes they aren't, runs
+# `<packageManager> add prisma@<version> -D --silent` on your behalf to
+# "fix" it - which is exactly the `pnpm add prisma@5.22.0 -D --silent`
+# command that was failing the build. Both packages ARE correctly
+# declared as real dependencies of @smartcode/api (`pnpm --filter
+# @smartcode/api why prisma` / `list prisma @prisma/client` confirm
+# this, and are unchanged by this fix) - the heuristic itself is what
+# misfired, not the dependency graph, so the correct fix is telling
+# Prisma to trust the workspace's own declarations instead of trying to
+# manage them itself mid-build.
+RUN PRISMA_GENERATE_SKIP_AUTOINSTALL=true pnpm --filter @smartcode/api prisma:generate
 # Sanity check the generated client actually loads before spending time
 # on a full Nest build that would fail later anyway if it didn't.
 RUN node -e "require('@prisma/client')" || (echo "FATAL: 'prisma generate' did not produce a loadable @prisma/client." && exit 1)
