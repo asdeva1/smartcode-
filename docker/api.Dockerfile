@@ -7,11 +7,19 @@
 
 FROM node:20-alpine AS base
 WORKDIR /repo
-# Pinned to the exact patch version verified working on the reference
-# Windows dev machine (pnpm 9.15.9), not a floating "pnpm@9" - a
-# different 9.x patch resolved at image-build time is a real, silent
-# variable this project already hit once and shouldn't hit again.
-RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
+# pnpm is installed via a plain `npm install -g`, NOT Corepack.
+# `corepack enable && corepack prepare pnpm@9.15.9 --activate` failed the
+# build outright (exit code 1) before the deps stage ever ran - Corepack
+# does its own package-signature verification against npm's registry as
+# a separate step from a normal package fetch, and that verification
+# step is what was failing here, not dependency installation itself. A
+# plain `npm install -g pnpm@<version>` is the same mechanism every other
+# global CLI install in this project already relies on, needs nothing
+# beyond standard registry access, and is asserted below to be the exact
+# version this project is pinned to - not just installed, but confirmed.
+RUN npm install -g pnpm@9.15.9 \
+    && test "$(pnpm --version)" = "9.15.9" \
+    && echo "pnpm 9.15.9 verified"
 
 FROM base AS deps
 # argon2 (see apps/api/src/modules/auth/providers/local-auth.provider.ts) is a
@@ -61,7 +69,11 @@ RUN pnpm --filter @smartcode/api build
 FROM node:20-alpine AS runner
 WORKDIR /repo
 ENV NODE_ENV=production
-RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
+# No pnpm install here, deliberately: CMD below invokes `node` directly,
+# never `pnpm` - installing pnpm in this stage was previously dead
+# weight (and one more copy of the same Corepack failure surface this
+# review just removed from the base stage). apps/web's runner stage
+# still needs pnpm because its CMD does invoke it - see docker/web.Dockerfile.
 COPY --from=build /repo /repo
 EXPOSE 4000
 CMD ["node", "apps/api/dist/main.js"]

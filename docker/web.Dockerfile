@@ -6,10 +6,12 @@
 
 FROM node:20-alpine AS base
 WORKDIR /repo
-# Pinned to the exact patch version verified working on the reference
-# Windows dev machine - see docker/api.Dockerfile for why floating
-# "pnpm@9" was a real, unverified variable worth removing.
-RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
+# pnpm installed via plain `npm install -g`, not Corepack - see
+# docker/api.Dockerfile's base stage comment for why Corepack's
+# `prepare`/`activate` step failed outright here and was replaced.
+RUN npm install -g pnpm@9.15.9 \
+    && test "$(pnpm --version)" = "9.15.9" \
+    && echo "pnpm 9.15.9 verified"
 
 FROM base AS deps
 # Copy every workspace member's package.json, not just @smartcode/web's
@@ -34,7 +36,11 @@ RUN pnpm --filter @smartcode/web build
 FROM node:20-alpine AS runner
 WORKDIR /repo
 ENV NODE_ENV=production
-RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
+# pnpm IS needed here - CMD below invokes it directly (unlike the API
+# runner, which calls `node` directly and needs no pnpm at all).
+RUN npm install -g pnpm@9.15.9 \
+    && test "$(pnpm --version)" = "9.15.9" \
+    && echo "pnpm 9.15.9 verified"
 COPY --from=build /repo /repo
 EXPOSE 3000
 CMD ["pnpm", "--filter", "@smartcode/web", "start"]
