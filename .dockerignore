@@ -1,0 +1,49 @@
+# SmartCode .dockerignore
+#
+# WHY THIS FILE MATTERS (this is not boilerplate): without it, `docker
+# build`'s context includes whatever the HOST checkout currently has on
+# disk - including a real, host-installed node_modules/ if `pnpm install`
+# was ever run locally before `docker compose up --build`. The
+# Dockerfiles' build stages do `COPY --from=deps /repo /repo` (the
+# correctly container-installed dependency tree) and THEN
+# `COPY apps/api apps/api` / `COPY apps/web apps/web` (source from the
+# build context) - without this file, that second COPY silently
+# overwrites the just-installed node_modules with whatever the host had,
+# which may be for the wrong platform/libc, may contain broken symlinks
+# (pnpm's structure differs meaningfully between Windows and Linux), or
+# may simply be missing devDependencies if the host's last install used
+# --prod. That mismatch is what produced:
+#   "Cannot find module '/repo/apps/api/node_modules/prisma/build/index.js'"
+# even though `pnpm install` had succeeded correctly in the deps stage
+# moments earlier in the same build.
+
+node_modules/
+**/node_modules/
+.pnpm-store/
+
+# Build output - always rebuilt inside the container, never copied in
+dist/
+build/
+.next/
+out/
+apps/api/dist/
+apps/web/.next/
+
+# Local env/secrets - never belong in an image
+.env
+.env.local
+.env.*.local
+
+# VCS / editor / OS noise
+.git/
+.gitignore
+.vscode/
+.idea/
+*.log
+.DS_Store
+
+# Test artifacts
+coverage/
+
+# This project's own docs/scripts aren't needed inside either image
+docs/
