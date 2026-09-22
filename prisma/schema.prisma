@@ -5,6 +5,21 @@
 // logic is implemented starting Phase 3/4.
 //
 // No JCD field exists anywhere in this schema. See docs/09-BUSINESS-RULES.md.
+//
+// VERIFICATION STATUS (Phase 1 technical review): the Prisma CLI (generate/
+// validate/format/migrate - every subcommand, including --help) could not
+// run in the review sandbox because it unconditionally attempts to fetch
+// its query/schema-engine binaries from binaries.prisma.sh on invocation,
+// and that host was not reachable there. This file has therefore been
+// verified MANUALLY, not by the Prisma compiler, against: syntax, every
+// relation's field/reference pairing and cardinality, foreign-key presence
+// and directionality (including the one deliberate exception - see
+// AuditEntry.chartId below), index redundancy, enum-default validity,
+// required/optional consistency between scalar FK fields and their
+// relations, and datasource/generator config. See docs/README.md
+// "Verifying this schema" for the exact commands to run this through the
+// real Prisma CLI (which will compiler-verify everything below) in an
+// environment with normal internet access.
 
 generator client {
   provider = "prisma-client-js"
@@ -61,8 +76,11 @@ model User {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  @@index([employeeId])
-  @@index([loginName])
+  // NOTE: no explicit @@index([employeeId]) / @@index([loginName]) here -
+  // @unique already creates a B-tree index on each of those columns.
+  // An additional @@index on the same single column would just be a
+  // second, redundant index maintained on every write for no query
+  // benefit - removed during the Phase 1 technical review.
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -195,7 +213,15 @@ model AuditEntry {
   id                String          @id @default(uuid())
   productionEntryId String
   productionEntry   ProductionEntry @relation(fields: [productionEntryId], references: [id])
-  chartId           String          // denormalized for direct chart-based lookup
+  // Deliberately NOT a @relation/foreign key to Chart - this is a read-path
+  // denormalization only (see docs/04-API-ARCHITECTURE.md "GET
+  // /charts/:chartId/audit-history"). Referential integrity for which
+  // chart an audit belongs to is enforced transitively through
+  // productionEntryId -> ProductionEntry.chartId, which IS a real FK.
+  // A stale/mismatched chartId here would be an application bug, not
+  // something the database schema itself can catch - flagged as a known
+  // trade-off, not an oversight.
+  chartId           String
   auditorId         String
   auditor           User            @relation("AuditorAudits", fields: [auditorId], references: [id])
 
