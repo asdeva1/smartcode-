@@ -21,6 +21,19 @@ RUN npm install -g pnpm@9.15.9 \
     && test "$(pnpm --version)" = "9.15.9" \
     && echo "pnpm 9.15.9 verified"
 
+# Prisma's query engine is a native binary that dynamically links against
+# OpenSSL to detect the correct engine variant for this platform. The
+# base `node:20-alpine` image does not include OpenSSL, and without it
+# Prisma fails with "Please manually install OpenSSL and try installing
+# Prisma again." - confirmed as the real error from the Windows Docker
+# build log. Installed once here, in `base`, so every stage that derives
+# FROM base (deps AND build) has it; `prisma generate` runs in the build
+# stage, and pnpm's own install-time scripts in the deps stage may also
+# probe for it, so both need it rather than just the one that seemed to
+# fail. The separate `runner` stage below is NOT derived from `base` and
+# gets its own explicit install for the same reason, at runtime.
+RUN apk add --no-cache openssl
+
 FROM base AS deps
 # argon2 (see apps/api/src/modules/auth/providers/local-auth.provider.ts) is a
 # native module. It ships prebuilt binaries for common platforms, but if none
@@ -60,50 +73,6 @@ COPY packages/types packages/types
 COPY packages/config packages/config
 COPY apps/api apps/api
 COPY prisma prisma
-
-# ============================================================
-# TEMPORARY DIAGNOSTIC BLOCK - added to expose the real error
-# behind "prisma:generate exited 1" with no visible detail.
-# Every step below is deliberately non-fatal (each ends `|| true`
-# or `; true`) so ALL of them run and print in a single
-# `docker compose build --no-cache api`, even if an earlier one
-# fails - the whole point is maximum information in one pass.
-# REMOVE this entire block once the real error has been read from
-# the build log and the root cause is fixed for real.
-# ============================================================
-RUN echo "=== 1. pwd ===" && pwd
-RUN echo "=== 2. node --version ===" && node --version
-RUN echo "=== 3. npm --version ===" && npm --version
-RUN echo "=== 4. pnpm --version ===" && pnpm --version
-RUN echo "=== 5. workspace recognition: pnpm --filter @smartcode/api exec pwd ===" \
-    && (pnpm --filter @smartcode/api exec pwd || true)
-RUN echo "=== 6. prisma package resolution ===" \
-    && (pnpm --filter @smartcode/api exec node -e "console.log(require.resolve('prisma/package.json'))" || true)
-RUN echo "=== 7a. ls -la .../prisma@5.22.0/node_modules/prisma/ ===" \
-    && (ls -la /repo/node_modules/.pnpm/prisma@5.22.0/node_modules/prisma/ || true)
-RUN echo "=== 7b. ls -la .../prisma@5.22.0/node_modules/prisma/build/ ===" \
-    && (ls -la /repo/node_modules/.pnpm/prisma@5.22.0/node_modules/prisma/build/ || true)
-RUN echo "=== 8a. ls -la /repo/apps/api/node_modules/ ===" \
-    && (ls -la /repo/apps/api/node_modules/ || true)
-RUN echo "=== 8b. ls -la /repo/apps/api/node_modules/prisma ===" \
-    && (ls -la /repo/apps/api/node_modules/prisma || true)
-RUN echo "=== 9. where does 'prisma' resolve from? ===" \
-    && (pnpm --filter @smartcode/api exec node -e "console.log(require.resolve('prisma'))" || true)
-RUN echo "=== 10a. ls -la /repo/prisma/ ===" \
-    && (ls -la /repo/prisma/ || true)
-RUN echo "=== 10b. ls -la /repo/prisma/schema.prisma ===" \
-    && (ls -la /repo/prisma/schema.prisma || true)
-RUN echo "=== 11. pnpm --filter @smartcode/api exec prisma --version (full output) ===" \
-    && (pnpm --filter @smartcode/api exec prisma --version; echo "--- exit code: $? ---")
-RUN echo "=== 12a. pnpm --filter @smartcode/api prisma:generate (the actual failing command, full output) ===" \
-    && (pnpm --filter @smartcode/api prisma:generate; echo "--- exit code: $? ---")
-RUN echo "=== 12b. direct invocation, bypassing the workspace filter, in case it's hiding the real error ===" \
-    && (cd /repo/apps/api && pnpm exec prisma generate --schema=../../prisma/schema.prisma; echo "--- exit code: $? ---")
-RUN echo "=== END DIAGNOSTIC BLOCK ==="
-# ============================================================
-# END TEMPORARY DIAGNOSTIC BLOCK
-# ============================================================
-
 RUN pnpm --filter @smartcode/api prisma:generate
 # Sanity check the generated client actually loads before spending time
 # on a full Nest build that would fail later anyway if it didn't.
@@ -113,11 +82,16 @@ RUN pnpm --filter @smartcode/api build
 FROM node:20-alpine AS runner
 WORKDIR /repo
 ENV NODE_ENV=production
+# Prisma Client's query engine binary runs HERE, at request time, not
+# just at generate-time in the build stage - this is a fresh `FROM
+# node:20-alpine`, so it needs its own OpenSSL install too, or the
+# container will build fine and then crash on its first database query.
+RUN apk add --no-cache openssl
 # No pnpm install here, deliberately: CMD below invokes `node` directly,
 # never `pnpm` - installing pnpm in this stage was previously dead
-# weight (and one more copy of the same Corepack failure surface this
-# review just removed from the base stage). apps/web's runner stage
-# still needs pnpm because its CMD does invoke it - see docker/web.Dockerfile.
+# weight (and one more copy of the Corepack failure surface removed
+# from the base stage in an earlier fix). apps/web's runner stage still
+# needs pnpm because its CMD does invoke it - see docker/web.Dockerfile.
 COPY --from=build /repo /repo
 EXPOSE 4000
 CMD ["node", "apps/api/dist/main.js"]

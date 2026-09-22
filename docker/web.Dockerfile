@@ -3,6 +3,13 @@
 # See ../.dockerignore - same reasoning as docker/api.Dockerfile's header
 # comment: without it, host node_modules/ leaks into the build context
 # and can clobber what the deps stage correctly installs.
+#
+# Deliberately no `apk add openssl` anywhere in this file: apps/web has
+# no Prisma dependency (confirmed via apps/web/package.json - it depends
+# only on @smartcode/types, @smartcode/ui, @smartcode/config, none of
+# which touch Prisma), so there's no native engine binary here that
+# would need it. Added only where it's actually required - see
+# docker/api.Dockerfile - not for symmetry between the two files.
 
 FROM node:20-alpine AS base
 WORKDIR /repo
