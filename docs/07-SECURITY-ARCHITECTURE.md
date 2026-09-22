@@ -12,9 +12,9 @@ RBAC as detailed in `03-RBAC-PERMISSIONS.md` — enforced at both route level (g
 
 ## Session Management
 
-- Access token: memory or short-lived cookie, never `localStorage` (XSS-exposed).
+- Access token: memory only, never `localStorage` (XSS-exposed) — confirmed in the Phase 1 implementation (`apps/web/src/stores/auth-store.ts`).
 - Refresh token: httpOnly cookie, inaccessible to JS.
-- Logout invalidates the refresh token server-side (Redis blocklist keyed by token ID) — not just a client-side cookie clear.
+- **Phase 1 status (known limitation, not the target end state):** logout clears the httpOnly refresh cookie client-side, which stops the browser from sending it again on this device, but does **not** invalidate the token server-side — a copy of that token elsewhere remains valid until it naturally expires. The Redis-backed blocklist keyed by token ID that closes this gap is deferred to the phase that wires up Redis/BullMQ for real, not skipped without a plan: `AuthProvider.revokeRefreshToken()` is already the seam it slots into, so closing this gap later needs no restructuring of the auth module. See `apps/api/src/modules/auth/providers/local-auth.provider.ts` for the exact mechanism and reasoning.
 
 ## Rate Limiting
 

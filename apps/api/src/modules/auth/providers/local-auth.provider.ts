@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
@@ -17,6 +17,8 @@ const LOCKOUT_MINUTES = 15;
  */
 @Injectable()
 export class LocalAuthProvider implements AuthProvider {
+  private readonly logger = new Logger(LocalAuthProvider.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
@@ -86,14 +88,42 @@ export class LocalAuthProvider implements AuthProvider {
     if (!user || !user.isActive) {
       throw new UnauthorizedException('User not found or inactive');
     }
-    // NOTE: Phase 1 does not yet implement a refresh-token blocklist in
-    // Redis for revocation-on-logout — flagged in the Phase 1 report as
-    // a known gap to close alongside the Redis/BullMQ wiring.
+    // Deliberately does not consult a revocation list - see
+    // revokeRefreshToken() below for why that's a real, documented gap
+    // rather than a silent one.
     return this.issueTokens(this.toAuthUser(user));
   }
 
+  /**
+   * KNOWN LIMITATION - deliberately deferred, not silently skipped.
+   *
+   * This does NOT invalidate the refresh token server-side. A refresh
+   * token issued before logout remains cryptographically valid (and
+   * usable at POST /auth/refresh) until it naturally expires
+   * (JWT_REFRESH_EXPIRY, 7 days by default) or the server-signing secret
+   * is rotated. What logout DOES do today, for real: the controller
+   * (auth.controller.ts) clears the httpOnly cookie client-side, so the
+   * browser stops sending the token on this device/browser - that is a
+   * genuine, effective mitigation for the common case (shared/lost
+   * device), just not a server-side kill switch reachable from, e.g., a
+   * different device holding a copy of the same token.
+   *
+   * The fix is a Redis SETEX on the token's jti (or its signature) with
+   * TTL = remaining token lifetime, checked before trusting a refresh.
+   * That slots in as an additional check inside THIS provider, behind
+   * the same AuthProvider interface - adding it later requires no
+   * restructuring of AuthModule, the controller, or any caller of
+   * AuthService. Deferred to the phase that wires up Redis/BullMQ for
+   * real (see docs/10-IMPLEMENTATION-ROADMAP.md) rather than built now
+   * against a Redis connection nothing else in Phase 1 yet depends on.
+   */
   async revokeRefreshToken(_refreshToken: string): Promise<void> {
-    // See NOTE above — Redis-backed blocklist lands with the caching work.
+    this.logger.warn(
+      'revokeRefreshToken() called but is a no-op in this phase - the refresh ' +
+        'token is NOT invalidated server-side, only the client-side cookie is ' +
+        'cleared by the caller. See the method doc comment for why and when ' +
+        'this closes.',
+    );
     return;
   }
 
