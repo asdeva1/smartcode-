@@ -60,6 +60,50 @@ COPY packages/types packages/types
 COPY packages/config packages/config
 COPY apps/api apps/api
 COPY prisma prisma
+
+# ============================================================
+# TEMPORARY DIAGNOSTIC BLOCK - added to expose the real error
+# behind "prisma:generate exited 1" with no visible detail.
+# Every step below is deliberately non-fatal (each ends `|| true`
+# or `; true`) so ALL of them run and print in a single
+# `docker compose build --no-cache api`, even if an earlier one
+# fails - the whole point is maximum information in one pass.
+# REMOVE this entire block once the real error has been read from
+# the build log and the root cause is fixed for real.
+# ============================================================
+RUN echo "=== 1. pwd ===" && pwd
+RUN echo "=== 2. node --version ===" && node --version
+RUN echo "=== 3. npm --version ===" && npm --version
+RUN echo "=== 4. pnpm --version ===" && pnpm --version
+RUN echo "=== 5. workspace recognition: pnpm --filter @smartcode/api exec pwd ===" \
+    && (pnpm --filter @smartcode/api exec pwd || true)
+RUN echo "=== 6. prisma package resolution ===" \
+    && (pnpm --filter @smartcode/api exec node -e "console.log(require.resolve('prisma/package.json'))" || true)
+RUN echo "=== 7a. ls -la .../prisma@5.22.0/node_modules/prisma/ ===" \
+    && (ls -la /repo/node_modules/.pnpm/prisma@5.22.0/node_modules/prisma/ || true)
+RUN echo "=== 7b. ls -la .../prisma@5.22.0/node_modules/prisma/build/ ===" \
+    && (ls -la /repo/node_modules/.pnpm/prisma@5.22.0/node_modules/prisma/build/ || true)
+RUN echo "=== 8a. ls -la /repo/apps/api/node_modules/ ===" \
+    && (ls -la /repo/apps/api/node_modules/ || true)
+RUN echo "=== 8b. ls -la /repo/apps/api/node_modules/prisma ===" \
+    && (ls -la /repo/apps/api/node_modules/prisma || true)
+RUN echo "=== 9. where does 'prisma' resolve from? ===" \
+    && (pnpm --filter @smartcode/api exec node -e "console.log(require.resolve('prisma'))" || true)
+RUN echo "=== 10a. ls -la /repo/prisma/ ===" \
+    && (ls -la /repo/prisma/ || true)
+RUN echo "=== 10b. ls -la /repo/prisma/schema.prisma ===" \
+    && (ls -la /repo/prisma/schema.prisma || true)
+RUN echo "=== 11. pnpm --filter @smartcode/api exec prisma --version (full output) ===" \
+    && (pnpm --filter @smartcode/api exec prisma --version; echo "--- exit code: $? ---")
+RUN echo "=== 12a. pnpm --filter @smartcode/api prisma:generate (the actual failing command, full output) ===" \
+    && (pnpm --filter @smartcode/api prisma:generate; echo "--- exit code: $? ---")
+RUN echo "=== 12b. direct invocation, bypassing the workspace filter, in case it's hiding the real error ===" \
+    && (cd /repo/apps/api && pnpm exec prisma generate --schema=../../prisma/schema.prisma; echo "--- exit code: $? ---")
+RUN echo "=== END DIAGNOSTIC BLOCK ==="
+# ============================================================
+# END TEMPORARY DIAGNOSTIC BLOCK
+# ============================================================
+
 RUN pnpm --filter @smartcode/api prisma:generate
 # Sanity check the generated client actually loads before spending time
 # on a full Nest build that would fail later anyway if it didn't.
