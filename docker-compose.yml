@@ -67,6 +67,15 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      # Next.js has no dedicated health route; "/" 307-redirects to /login
+      # (see src/app/page.tsx), so any response under 500 means the server
+      # is up and routing - http.get() doesn't follow redirects by default,
+      # which is fine here, we only care that it responded at all.
+      test: ['CMD', 'node', '-e', "require('http').get('http://localhost:3000/', r => process.exit(r.statusCode<500?0:1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks: [smartcode-net]
 
 networks:

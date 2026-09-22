@@ -5,6 +5,12 @@ WORKDIR /repo
 RUN corepack enable && corepack prepare pnpm@9 --activate
 
 FROM base AS deps
+# argon2 (see apps/api/src/modules/auth/providers/local-auth.provider.ts) is a
+# native module. It ships prebuilt binaries for common platforms, but if none
+# matches this exact node:alpine (musl) target, node-gyp-build falls back to
+# compiling from source - these packages make that fallback succeed instead
+# of failing the image build.
+RUN apk add --no-cache python3 make g++
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* ./
 COPY packages/types/package.json packages/types/package.json
 COPY packages/config/package.json packages/config/package.json
