@@ -1,0 +1,38 @@
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+import { PrismaModule } from './prisma/prisma.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { UsersModule } from './modules/users/users.module';
+import { TeamsModule } from './modules/teams/teams.module';
+import { HealthModule } from './modules/health/health.module';
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { envValidationSchema } from './config/env.validation';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      validationSchema: envValidationSchema,
+    }),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60_000,
+        limit: 100, // global default; auth endpoints apply a tighter limit locally
+      },
+    ]),
+    PrismaModule,
+    AuthModule,
+    UsersModule,
+    TeamsModule,
+    HealthModule,
+  ],
+  providers: [
+    // Every route requires a valid JWT unless annotated @Public() —
+    // see common/decorators/public.decorator.ts and docs/07-SECURITY-ARCHITECTURE.md.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+  ],
+})
+export class AppModule {}
