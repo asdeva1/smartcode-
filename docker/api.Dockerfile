@@ -137,6 +137,20 @@ RUN PRISMA_GENERATE_SKIP_AUTOINSTALL=true pnpm --filter @smartcode/api prisma:ge
 # directory for this specific check.
 RUN cd /repo/apps/api && node -e "require('@prisma/client'); console.log('CLIENT LOAD OK')" \
     || (echo "FATAL: 'prisma generate' did not produce a loadable @prisma/client." && exit 1)
+# @smartcode/types must be built to real dist/ output BEFORE @smartcode/api,
+# since apps/api now resolves it as a normal compiled package dependency
+# (via its own package.json main/types fields) rather than pulling its
+# .ts source directly into apps/api's compilation through a tsconfig
+# `paths` override. That override was the root cause of a prior bug:
+# with packages/types/src included as a direct compilation input,
+# TypeScript's rootDir inference computed /repo (the lowest common
+# ancestor of apps/api/src and packages/types/src) instead of
+# apps/api/src alone, so `nest build` emitted to dist/apps/api/src/main.js
+# instead of the flat dist/main.js this image's CMD expects. Building
+# packages/types first, and consuming only its compiled output, keeps
+# apps/api's own compilation - and therefore its rootDir - confined to
+# apps/api/src, exactly as intended.
+RUN pnpm --filter @smartcode/types build
 RUN pnpm --filter @smartcode/api build
 
 FROM node:20-alpine AS runner
