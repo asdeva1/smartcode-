@@ -2,7 +2,7 @@
  * Status enums — finalized per docs/11-SCHEMA-DECISIONS.md.
  * Single source of truth for the Prisma enum, backend validation,
  * and every StatusBadge in the UI. Do not diverge these lists
- * from the Prisma schema (prisma/schema.prisma) without updating
+ * from the Prisma schema (apps/api/prisma/schema.prisma) without updating
  * both together.
  */
 

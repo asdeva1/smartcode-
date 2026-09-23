@@ -72,55 +72,41 @@ COPY --from=deps /repo /repo
 COPY packages/types packages/types
 COPY packages/config packages/config
 COPY apps/api apps/api
-COPY prisma prisma
+# No separate `COPY prisma prisma` - the schema now lives at
+# apps/api/prisma/ (moved during this review; see that schema file's
+# header comment for why) and is already brought in by `COPY apps/api
+# apps/api` above. A root-level prisma/ directory no longer exists.
 
 # ============================================================
-# TEMPORARY DIAGNOSTIC BLOCK - to confirm/refute, from the real
-# Alpine container, a hypothesis formed from equivalent evidence
-# gathered in a Linux sandbox with the same monorepo structure:
-# that Prisma's client-resolution walks upward from the SCHEMA
-# FILE's directory (/repo/prisma/), not from apps/api/ where
-# @prisma/client is actually declared and symlinked - and since
-# /repo/prisma/ has no node_modules of its own, and pnpm's strict
-# isolation means @prisma/client is NOT hoisted to /repo/node_modules
-# either, that upward walk finds nothing. Every step below is
-# non-fatal so all of them print in one build. REMOVE once the real
-# cause is confirmed from this output.
+# TEMPORARY DIAGNOSTIC BLOCK - exact block as specified for the prior
+# review pass, with its final step repointed from the now-removed
+# /repo/prisma to /repo/apps/api/prisma - the schema's new location -
+# since that's the actual test of whether this move fixes the
+# resolution failure. REMOVE once the real cause is confirmed from
+# this output; do not leave in the production Dockerfile.
 # ============================================================
-RUN echo "=== A. apps/api/package.json ===" && cat /repo/apps/api/package.json
-RUN echo "=== B. @prisma/client existence (apps/api) ===" \
-    && (test -e /repo/apps/api/node_modules/@prisma/client && echo "API CLIENT EXISTS" || echo "API CLIENT MISSING")
-RUN echo "=== C. @prisma+client* dirs in pnpm store ===" \
-    && (find /repo/node_modules/.pnpm -maxdepth 2 -type d -name '@prisma+client*' -print || true)
-RUN echo "=== D. apps/api/node_modules contents ===" \
-    && (ls -la /repo/apps/api/node_modules || true)
-RUN echo "=== E. @prisma scope (apps/api) ===" \
-    && (ls -la /repo/apps/api/node_modules/@prisma || true)
-RUN echo "=== F. exact symlink ===" \
-    && (ls -la /repo/apps/api/node_modules/@prisma/client || true)
-RUN echo "=== G. readlink ===" \
-    && (readlink /repo/apps/api/node_modules/@prisma/client || true)
-RUN echo "=== H. package.json at resolved client location ===" \
-    && (if [ -f /repo/apps/api/node_modules/@prisma/client/package.json ]; then cat /repo/apps/api/node_modules/@prisma/client/package.json; else echo "CLIENT PACKAGE.JSON MISSING"; fi)
-RUN echo "=== I. Prisma Client runtime files in the pnpm store ===" \
-    && (find /repo/node_modules/.pnpm -path '*/@prisma/client/package.json' -print || true) \
-    && (find /repo/node_modules/.pnpm -path '*/@prisma/client/default.js' -print || true) \
-    && (find /repo/node_modules/.pnpm -path '*/@prisma/client/index.js' -print || true)
-RUN echo "=== I2. is @prisma/client hoisted to the REPO ROOT (not apps/api)? ===" \
-    && (test -e /repo/node_modules/@prisma/client && echo "ROOT: EXISTS" || echo "ROOT: MISSING - only reachable via apps/api/node_modules") \
-    && (test -d /repo/prisma/node_modules && echo "prisma/node_modules EXISTS" || echo "prisma/node_modules does NOT exist (schema's own directory has no node_modules)")
-RUN echo "=== J. pnpm list/why (from apps/api) ===" \
-    && (cd /repo/apps/api && pnpm list @prisma/client prisma; pnpm why @prisma/client; pnpm why prisma)
-RUN echo "=== K. node require.resolve, from apps/api ===" \
-    && (cd /repo/apps/api && node -e "console.log(require.resolve('@prisma/client/package.json'))"; echo "--- exit code: $? ---")
-RUN echo "=== L. node require('@prisma/client') load test, from apps/api ===" \
-    && (cd /repo/apps/api && node -e "const p=require('@prisma/client'); console.log('CLIENT LOAD OK', Object.keys(p).slice(0,10))"; echo "--- exit code: $? ---")
-RUN echo "=== K2/L2. SAME TWO TESTS, but run from /repo/prisma (the schema's own directory) - this is the specific comparison that tests the hypothesis above ===" \
-    && (cd /repo/prisma && node -e "console.log(require.resolve('@prisma/client/package.json'))"; echo "--- exit code: $? ---") \
-    && (cd /repo/prisma && node -e "const p=require('@prisma/client'); console.log('CLIENT LOAD OK', Object.keys(p).slice(0,10))"; echo "--- exit code: $? ---")
-RUN echo "=== M. full pnpm store structure (prisma-related) ===" \
-    && (find /repo/node_modules/.pnpm -maxdepth 1 -type d | grep -E '@prisma|prisma@' | sort || true)
-RUN echo "=== END DIAGNOSTIC BLOCK ==="
+RUN echo "=== API PACKAGE ===" \
+ && cat /repo/apps/api/package.json \
+ && echo "=== API CLIENT LINK ===" \
+ && ls -la /repo/apps/api/node_modules/@prisma 2>/dev/null || true \
+ && ls -la /repo/apps/api/node_modules/@prisma/client 2>/dev/null || true \
+ && echo "=== CLIENT REALPATH ===" \
+ && readlink /repo/apps/api/node_modules/@prisma/client 2>/dev/null || true \
+ && echo "=== PNPM PRISMA PACKAGES ===" \
+ && find /repo/node_modules/.pnpm -maxdepth 2 -type d -name '@prisma+client*' -print \
+ && find /repo/node_modules/.pnpm -maxdepth 2 -type d -name 'prisma@*' -print \
+ && echo "=== PNPM LIST ===" \
+ && cd /repo/apps/api \
+ && pnpm list @prisma/client prisma \
+ && echo "=== PNPM WHY CLIENT ===" \
+ && pnpm why @prisma/client \
+ && echo "=== NODE RESOLUTION FROM API ===" \
+ && node -e "console.log(require.resolve('@prisma/client/package.json'))" \
+ && echo "=== NODE CLIENT LOAD FROM API ===" \
+ && node -e "require('@prisma/client'); console.log('CLIENT LOAD OK')" \
+ && echo "=== NODE RESOLUTION FROM SCHEMA DIRECTORY (now apps/api/prisma, not /repo/prisma) ===" \
+ && cd /repo/apps/api/prisma \
+ && node -e "console.log(require.resolve('@prisma/client/package.json'))"
 # ============================================================
 # END TEMPORARY DIAGNOSTIC BLOCK
 # ============================================================

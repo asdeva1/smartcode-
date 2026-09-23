@@ -6,6 +6,15 @@
 //
 // No JCD field exists anywhere in this schema. See docs/09-BUSINESS-RULES.md.
 //
+// LOCATION: this schema lives under apps/api/prisma/, not at the repo
+// root. It was moved here during the Phase 1 Docker review - Prisma's
+// client-resolution walks upward from the schema file's own directory,
+// and a root-level prisma/ (a sibling of apps/api, not an ancestor of
+// it) could never find @prisma/client, which only apps/api declares.
+// apps/api/prisma/ IS a descendant of apps/api/, so the same upward
+// walk now succeeds. See docker/api.Dockerfile's build stage comment
+// for the full explanation.
+//
 // VERIFICATION STATUS (Phase 1 technical review): the Prisma CLI (generate/
 // validate/format/migrate - every subcommand, including --help) could not
 // run in the review sandbox because it unconditionally attempts to fetch
@@ -16,10 +25,10 @@
 // and directionality (including the one deliberate exception - see
 // AuditEntry.chartId below), index redundancy, enum-default validity,
 // required/optional consistency between scalar FK fields and their
-// relations, and datasource/generator config. See docs/README.md
-// "Verifying this schema" for the exact commands to run this through the
-// real Prisma CLI (which will compiler-verify everything below) in an
-// environment with normal internet access.
+// relations, and datasource/generator config. See the root README.md's
+// "Verifying this schema" section for the exact commands to run this
+// through the real Prisma CLI (which will compiler-verify everything
+// below) in an environment with normal internet access.
 
 generator client {
   provider = "prisma-client-js"

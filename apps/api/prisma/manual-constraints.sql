@@ -1,9 +1,12 @@
 -- SmartCode — manually-required database constraint
 -- ===================================================
 -- This file is NOT a Prisma migration and must never be applied on its
--- own or placed directly inside prisma/migrations/. It exists only as a
--- copy-paste reference for the one step in README.md's "Database Setup"
--- section that Prisma's schema.prisma DSL cannot express.
+-- own or placed directly inside apps/api/prisma/migrations/. It exists
+-- only as a copy-paste reference for the one step in README.md's
+-- "Database Setup" section that Prisma's schema.prisma DSL cannot
+-- express. (Lives alongside schema.prisma under apps/api/prisma/ - see
+-- that file's header comment for why the schema moved here from the
+-- repo root during the Phase 1 Docker review.)
 --
 -- WHY THIS CONSTRAINT EXISTS
 -- --------------------------
@@ -20,10 +23,10 @@
 --
 -- HOW TO APPLY THIS (see README.md "Database Setup" for the full sequence)
 -- --------------------------------------------------------------------
---   1. pnpm --filter @smartcode/api exec prisma migrate dev --schema=../../prisma/schema.prisma --name init --create-only
---   2. Open the generated prisma/migrations/<timestamp>_init/migration.sql
+--   1. pnpm --filter @smartcode/api exec prisma migrate dev --schema=./prisma/schema.prisma --name init --create-only
+--   2. Open the generated apps/api/prisma/migrations/<timestamp>_init/migration.sql
 --   3. Paste the statement below at the END of that file
---   4. pnpm --filter @smartcode/api exec prisma migrate dev --schema=../../prisma/schema.prisma
+--   4. pnpm --filter @smartcode/api exec prisma migrate dev --schema=./prisma/schema.prisma
 --      (applies the now-edited migration)
 --
 -- INDEX NAME: ProductionEntry_chartId_current_unique

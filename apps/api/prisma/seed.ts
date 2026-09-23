@@ -1,7 +1,9 @@
 /**
  * Seeds exactly one Manager account so the account-creation hierarchy
  * (Manager -> TL/Auditor -> Coder) has a starting point. Run via:
- *   pnpm --filter @smartcode/api exec ts-node ../../prisma/seed.ts
+ *   pnpm --filter @smartcode/api exec ts-node ./prisma/seed.ts
+ * (Moved here from the repo-root prisma/ during the Phase 1 Docker
+ * review - see apps/api/prisma/schema.prisma's header comment for why.)
  * Password is read from SEED_MANAGER_PASSWORD (falls back to a dev-only
  * default) - never hardcode a real credential here.
  */

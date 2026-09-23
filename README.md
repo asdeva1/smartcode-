@@ -21,13 +21,16 @@ smartcode/
 ├── apps/
 │   ├── web/            Next.js frontend
 │   └── api/             NestJS backend
+│       └── prisma/       Approved, versioned database schema (moved here
+│                          from the repo root during Phase 1's Docker
+│                          review - see schema.prisma's header comment)
+│           ├── schema.prisma
+│           ├── seed.ts
+│           └── manual-constraints.sql
 ├── packages/
 │   ├── types/           Shared roles, status enums, Zod schemas (source of truth for both apps)
 │   ├── config/          Shared navigation config
 │   └── ui/               Design system (21 components, MUI-based, token-driven)
-├── prisma/
-│   ├── schema.prisma     Approved, versioned database schema
-│   └── seed.ts           Seeds one Manager account
 ├── docker/                Dockerfiles for api/web
 ├── docs/                  Approved architecture & business-rules documentation
 ├── docker-compose.yml
@@ -68,7 +71,7 @@ Starts `postgres`, `redis`, `api` (port 4000), and `web` (port 3000), in depende
 
 ## Verifying this schema (Prisma)
 
-**Why this section exists:** the Phase 1 build environment could not reach `binaries.prisma.sh`, which every Prisma CLI subcommand — including `generate`, `validate`, `format`, `migrate`, and even `--help` — contacts unconditionally to verify/fetch its query- and schema-engine binaries before doing anything else. No Prisma CLI command ran successfully there, at all. `prisma/schema.prisma` was instead reviewed **manually**, field by field: every relation's `fields`/`references` pairing and cardinality, foreign-key presence and direction (with one deliberate non-FK denormalization, documented inline on `AuditEntry.chartId`), index redundancy (two duplicate single-column indexes on `User` were found and removed this way), enum-default validity, and required/optional consistency between scalar FK columns and their relations. That review is documented in the schema file's own header comment and in this project's Phase 1 review history — but it is not a substitute for the compiler actually checking it, which is why the commands below matter.
+**Why this section exists:** the Phase 1 build environment could not reach `binaries.prisma.sh`, which every Prisma CLI subcommand — including `generate`, `validate`, `format`, `migrate`, and even `--help` — contacts unconditionally to verify/fetch its query- and schema-engine binaries before doing anything else. No Prisma CLI command ran successfully there, at all. `apps/api/prisma/schema.prisma` was instead reviewed **manually**, field by field: every relation's `fields`/`references` pairing and cardinality, foreign-key presence and direction (with one deliberate non-FK denormalization, documented inline on `AuditEntry.chartId`), index redundancy (two duplicate single-column indexes on `User` were found and removed this way), enum-default validity, and required/optional consistency between scalar FK columns and their relations. That review is documented in the schema file's own header comment and in this project's Phase 1 review history — but it is not a substitute for the compiler actually checking it, which is why the commands below matter.
 
 Run these locally, in order, on a machine with normal internet access:
 
@@ -85,14 +88,14 @@ pnpm --filter @smartcode/api prisma:generate
 ```bash
 # 2. Creates the migration SQL from schema.prisma WITHOUT applying it yet,
 #    so the partial-index statement can be added first (see next step).
-pnpm --filter @smartcode/api exec prisma migrate dev --schema=../../prisma/schema.prisma --name init --create-only
+pnpm --filter @smartcode/api exec prisma migrate dev --schema=./prisma/schema.prisma --name init --create-only
 ```
 
-**Expected output:** `Prisma Migrate created the following migration without applying it: prisma/migrations/<timestamp>_init/`, exit code 0.
+**Expected output:** `Prisma Migrate created the following migration without applying it: apps/api/prisma/migrations/<timestamp>_init/`, exit code 0.
 
 ```bash
 # 3. Open the generated migration.sql it just created and paste the
-#    contents of prisma/manual-constraints.sql onto the end of it.
+#    contents of apps/api/prisma/manual-constraints.sql onto the end of it.
 #    (See that file for the exact statement, its name, and why it's
 #    needed — it enforces "exactly one current Production version per
 #    Chart" at the database level, not just in application code.)
@@ -100,14 +103,14 @@ pnpm --filter @smartcode/api exec prisma migrate dev --schema=../../prisma/schem
 
 ```bash
 # 4. Apply the (now hand-edited) migration against your running Postgres.
-pnpm --filter @smartcode/api exec prisma migrate dev --schema=../../prisma/schema.prisma
+pnpm --filter @smartcode/api exec prisma migrate dev --schema=./prisma/schema.prisma
 ```
 
 **Expected output:** `Your database is now in sync with your schema`, plus a list of the tables created (`User`, `Team`, `Client`, `Project`, `AuditorProjectAssignment`, `Chart`, `ProductionEntry`, `AuditEntry`, `Notification`, `ActivityLog`, `AuditLog`), exit code 0. If the partial index from step 3 has a syntax error, this step is where it will fail — that's the real, compiler/database-verified check that step never got in this review.
 
 ```bash
 # 5. Seed one Manager account (login: manager.admin)
-SEED_MANAGER_PASSWORD='<choose a password>' pnpm --filter @smartcode/api exec ts-node ../../prisma/seed.ts
+SEED_MANAGER_PASSWORD='<choose a password>' pnpm --filter @smartcode/api exec ts-node ./prisma/seed.ts
 ```
 
 **Expected output:** `Seeded Manager: manager.admin (EMP0001)`.
@@ -178,18 +181,18 @@ Expect: `✔ Generated Prisma Client ...`. If this fails on a network/checksum e
 
 **6. Run the Prisma migration**
 ```powershell
-pnpm --filter @smartcode/api exec prisma migrate dev --schema=../../prisma/schema.prisma --name init --create-only
+pnpm --filter @smartcode/api exec prisma migrate dev --schema=./prisma/schema.prisma --name init --create-only
 ```
-Open the generated `prisma\migrations\<timestamp>_init\migration.sql` in your editor and paste the contents of `prisma\manual-constraints.sql` onto the end of it. Then:
+Open the generated `apps\api\prisma\migrations\<timestamp>_init\migration.sql` in your editor and paste the contents of `apps\api\prisma\manual-constraints.sql` onto the end of it. Then:
 ```powershell
-pnpm --filter @smartcode/api exec prisma migrate dev --schema=../../prisma/schema.prisma
+pnpm --filter @smartcode/api exec prisma migrate dev --schema=./prisma/schema.prisma
 ```
 Expect: `Your database is now in sync with your schema`.
 
 **7. Seed development data**
 ```powershell
 $env:SEED_MANAGER_PASSWORD = "ChooseAPassword123!"
-pnpm --filter @smartcode/api exec ts-node ../../prisma/seed.ts
+pnpm --filter @smartcode/api exec ts-node ./prisma/seed.ts
 ```
 Expect: `Seeded Manager: manager.admin (EMP0001)`.
 
