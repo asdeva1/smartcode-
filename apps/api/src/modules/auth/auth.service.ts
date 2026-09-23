@@ -1,4 +1,5 @@
 import { Injectable, Inject, UnauthorizedException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import type { AuthUser, TokenPair } from '@smartcode/types';
 import { AUTH_PROVIDER, type AuthProvider } from './providers/auth-provider.interface';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -39,7 +40,7 @@ export class AuthService {
   private async logAuditEvent(
     userId: string | null,
     action: 'LOGIN' | 'LOGOUT' | 'LOGIN_FAILED',
-    meta: Record<string, unknown>,
+    meta: Prisma.InputJsonObject,
   ): Promise<void> {
     await this.prisma.auditLog.create({
       data: {

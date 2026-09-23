@@ -69,6 +69,7 @@ RUN test -e node_modules/.pnpm/prisma@*/node_modules/prisma/build/index.js \
 
 FROM base AS build
 COPY --from=deps /repo /repo
+COPY tsconfig.base.json tsconfig.base.json
 COPY packages/types packages/types
 COPY packages/config packages/config
 COPY apps/api apps/api
