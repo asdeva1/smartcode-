@@ -127,8 +127,15 @@ RUN echo "=== API PACKAGE ===" \
 # manage them itself mid-build.
 RUN PRISMA_GENERATE_SKIP_AUTOINSTALL=true pnpm --filter @smartcode/api prisma:generate
 # Sanity check the generated client actually loads before spending time
-# on a full Nest build that would fail later anyway if it didn't.
-RUN node -e "require('@prisma/client')" || (echo "FATAL: 'prisma generate' did not produce a loadable @prisma/client." && exit 1)
+# on a full Nest build that would fail later anyway if it didn't. Must
+# run from apps/api, not the default /repo WORKDIR - @prisma/client is
+# correctly declared only in apps/api/package.json (see
+# docker/api.Dockerfile's deps stage and apps/api/package.json), not at
+# the repo root, so resolving it from /repo was never expected to work
+# and isn't evidence of anything broken - it was just the wrong
+# directory for this specific check.
+RUN cd /repo/apps/api && node -e "require('@prisma/client'); console.log('CLIENT LOAD OK')" \
+    || (echo "FATAL: 'prisma generate' did not produce a loadable @prisma/client." && exit 1)
 RUN pnpm --filter @smartcode/api build
 
 FROM node:20-alpine AS runner
