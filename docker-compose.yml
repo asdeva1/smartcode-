@@ -62,6 +62,9 @@ services:
     env_file: .env
     environment:
       NEXT_PUBLIC_API_URL: http://api:4000
+      NODE_ENV: production
+      PORT: "3000"
+
     ports:
       - '3000:3000'
     depends_on:
