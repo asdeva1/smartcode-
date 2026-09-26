@@ -3,6 +3,9 @@ import { canCreateRole, type AuthUser, type Role } from '@smartcode/types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LocalAuthProvider } from '../auth/providers/local-auth.provider';
 import { CreateUserDto } from './dto/create-user.dto';
+import { CreateTeamLeadDto } from './dto/create-team-lead.dto';
+import { UpdateTeamLeadDto } from './dto/update-team-lead.dto';
+import { ListTeamLeadsDto } from './dto/list-team-leads.dto';
 
 @Injectable()
 export class UsersService {
@@ -51,6 +54,7 @@ export class UsersService {
     const user = await this.prisma.user.create({
       data: {
         employeeId: dto.employeeId,
+        fullName: dto.fullName,
         loginName: dto.loginName,
         email: dto.email,
         passwordHash,
@@ -64,7 +68,7 @@ export class UsersService {
       data: {
         userId: creator.id,
         role: creator.role,
-        action: 'USER_CREATED',
+        action: targetRole === 'TEAM_LEAD' ? 'TEAM_LEAD_CREATED' : 'USER_CREATED',
         entity: 'User',
         entityId: user.id,
         after: { employeeId: user.employeeId, loginName: user.loginName, role: user.role },
@@ -73,6 +77,32 @@ export class UsersService {
 
     const { passwordHash: _omit, ...safeUser } = user;
     return safeUser;
+  }
+
+  /**
+   * Team-Lead-specific creation - wraps createWithRole's hierarchy
+   * enforcement and uniqueness checks, then additionally handles the
+   * optional "assign to an existing Team" step. Kept separate from
+   * createWithRole (still used as-is for Auditor creation) rather than
+   * overloading it with team-assignment logic that only applies here.
+   */
+  async createTeamLead(caller: AuthUser, dto: CreateTeamLeadDto) {
+    if (dto.teamId) {
+      const team = await this.prisma.team.findUnique({ where: { id: dto.teamId } });
+      if (!team) throw new NotFoundException('Team not found');
+      if (team.teamLeadId) {
+        throw new ConflictException('This team already has a Team Lead assigned');
+      }
+    }
+
+    const { teamId, ...userDto } = dto;
+    const user = await this.createWithRole(caller, 'TEAM_LEAD', userDto);
+
+    if (teamId) {
+      await this.prisma.team.update({ where: { id: teamId }, data: { teamLeadId: user.id } });
+    }
+
+    return this.toTeamLeadDto(await this.findTeamLeadById(user.id));
   }
 
   /** Scoped list — Manager sees all, TL sees own team, others see self only. */
@@ -105,11 +135,12 @@ export class UsersService {
       data: { isActive },
     });
 
+    const actionBase = target.role === 'TEAM_LEAD' ? 'TEAM_LEAD' : 'USER';
     await this.prisma.auditLog.create({
       data: {
         userId: caller.id,
         role: caller.role,
-        action: isActive ? 'USER_ACTIVATED' : 'USER_DEACTIVATED',
+        action: isActive ? `${actionBase}_ACTIVATED` : `${actionBase}_DEACTIVATED`,
         entity: 'User',
         entityId: targetId,
         before: { isActive: target.isActive },
@@ -119,5 +150,141 @@ export class UsersService {
 
     const { passwordHash: _omit, ...safeUser } = updated;
     return safeUser;
+  }
+
+  /**
+   * Manager-only, paginated, searchable Team Lead list - distinct from
+   * findScoped() above, which returns ALL visible users unpaginated for
+   * whichever role calls it. This is the dedicated listing this
+   * module's UI actually needs.
+   */
+  async findTeamLeads(caller: AuthUser, query: ListTeamLeadsDto) {
+    if (caller.role !== 'MANAGER') {
+      throw new ForbiddenException('Only a Manager can list Team Leads');
+    }
+
+    const where: Record<string, unknown> = { role: 'TEAM_LEAD' as const };
+    if (query.status === 'active') where.isActive = true;
+    if (query.status === 'inactive') where.isActive = false;
+    if (query.teamId) where.teamId = query.teamId;
+    if (query.search) {
+      const search = query.search.trim();
+      where.OR = [
+        { fullName: { contains: search, mode: 'insensitive' } },
+        { loginName: { contains: search, mode: 'insensitive' } },
+        { employeeId: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [rows, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        include: { team: { select: { id: true, name: true } } },
+        orderBy: { createdAt: 'desc' },
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return {
+      data: rows.map((r: any) => this.toTeamLeadDto(r)),
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+    };
+  }
+
+  async updateTeamLead(caller: AuthUser, id: string, dto: UpdateTeamLeadDto) {
+    if (caller.role !== 'MANAGER') {
+      throw new ForbiddenException('Only a Manager can edit a Team Lead');
+    }
+
+    const target = await this.findTeamLeadById(id);
+
+    if (dto.employeeId || dto.email) {
+      const conflict = await this.prisma.user.findFirst({
+        where: {
+          id: { not: id },
+          OR: [
+            ...(dto.employeeId ? [{ employeeId: dto.employeeId }] : []),
+            ...(dto.email ? [{ email: dto.email }] : []),
+          ],
+        },
+      });
+      if (conflict) {
+        throw new ConflictException('Another user already has this employee ID or email');
+      }
+    }
+
+    if (dto.teamId !== undefined) {
+      // Clear this Team Lead from whichever team they currently lead
+      // (if any) before assigning the new one, and reject assigning
+      // them to a team that already has a different Team Lead.
+      if (dto.teamId === null) {
+        await this.prisma.team.updateMany({ where: { teamLeadId: id }, data: { teamLeadId: null } });
+      } else {
+        const team = await this.prisma.team.findUnique({ where: { id: dto.teamId } });
+        if (!team) throw new NotFoundException('Team not found');
+        if (team.teamLeadId && team.teamLeadId !== id) {
+          throw new ConflictException('This team already has a Team Lead assigned');
+        }
+        await this.prisma.team.updateMany({ where: { teamLeadId: id }, data: { teamLeadId: null } });
+        await this.prisma.team.update({ where: { id: dto.teamId }, data: { teamLeadId: id } });
+      }
+    }
+
+    const { teamId: _teamId, ...fields } = dto;
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: fields,
+      include: { team: { select: { id: true, name: true } } },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: caller.id,
+        role: caller.role,
+        action: 'TEAM_LEAD_UPDATED',
+        entity: 'User',
+        entityId: id,
+        before: {
+          fullName: target.fullName,
+          email: target.email,
+          employeeId: target.employeeId,
+          teamId: target.teamId,
+        },
+        after: { fullName: updated.fullName, email: updated.email, employeeId: updated.employeeId },
+      },
+    });
+
+    return this.toTeamLeadDto(updated);
+  }
+
+  private async findTeamLeadById(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      include: { team: { select: { id: true, name: true } } },
+    });
+    if (!user || user.role !== 'TEAM_LEAD') {
+      throw new NotFoundException('Team Lead not found');
+    }
+    return user;
+  }
+
+  /** Strips passwordHash and every other sensitive/internal field - never returned to the client. */
+  private toTeamLeadDto(user: any) {
+    return {
+      id: user.id,
+      employeeId: user.employeeId,
+      loginName: user.loginName,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      isActive: user.isActive,
+      createdAt: user.createdAt,
+      team: user.team ?? null,
+    };
   }
 }

@@ -18,7 +18,12 @@ async function main() {
 
   const manager = await prisma.user.upsert({
     where: { loginName: 'manager.admin' },
-    update: {},
+    update: {
+      passwordHash,
+      employeeId: 'EMP0001',
+      role: 'MANAGER',
+      isActive: true,
+    },
     create: {
       employeeId: 'EMP0001',
       loginName: 'manager.admin',
@@ -30,8 +35,11 @@ async function main() {
   });
 
   console.log(`Seeded Manager: ${manager.loginName} (${manager.employeeId})`);
+
   if (!process.env.SEED_MANAGER_PASSWORD) {
-    console.warn('SEED_MANAGER_PASSWORD not set - used dev-only default. Do not use in a shared environment.');
+    console.warn(
+      'SEED_MANAGER_PASSWORD not set - used dev-only default. Do not use in a shared environment.',
+    );
   }
 }
 

@@ -5,49 +5,62 @@
 # and can clobber what the deps stage correctly installs.
 #
 # Deliberately no `apk add openssl` anywhere in this file: apps/web has
-# no Prisma dependency (confirmed via apps/web/package.json - it depends
-# only on @smartcode/types, @smartcode/ui, @smartcode/config, none of
-# which touch Prisma), so there's no native engine binary here that
-# would need it. Added only where it's actually required - see
-# docker/api.Dockerfile - not for symmetry between the two files.
+# no Prisma dependency, so there is no native Prisma engine here that
+# needs OpenSSL.
 
 FROM node:20-alpine AS base
 WORKDIR /repo
-# pnpm installed via plain `npm install -g`, not Corepack - see
-# docker/api.Dockerfile's base stage comment for why Corepack's
-# `prepare`/`activate` step failed outright here and was replaced.
+
+# Install the exact pnpm version used by the repository.
 RUN npm install -g pnpm@9.15.9 \
     && test "$(pnpm --version)" = "9.15.9" \
     && echo "pnpm 9.15.9 verified"
 
 FROM base AS deps
-# Copy every workspace member's package.json, not just @smartcode/web's
-# dependency closure - see docker/api.Dockerfile's deps stage comment
-# for why a partial manifest copy is risky with --frozen-lockfile.
+
+# Copy workspace manifests first so dependency installation can use the
+# existing frozen lockfile.
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* ./
 COPY apps/web/package.json apps/web/package.json
 COPY apps/api/package.json apps/api/package.json
 COPY packages/types/package.json packages/types/package.json
 COPY packages/config/package.json packages/config/package.json
 COPY packages/ui/package.json packages/ui/package.json
+
 RUN pnpm install --frozen-lockfile --filter @smartcode/web...
 
 FROM base AS build
+
+# IMPORTANT:
+# NEXT_PUBLIC_API_URL is required during `next build` because
+# apps/web/next.config.js uses it to generate the Next.js rewrite.
+#
+# The Docker service name `api` is reachable from the web container.
+ARG NEXT_PUBLIC_API_URL=http://api:4000
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
 COPY --from=deps /repo /repo
 COPY packages/types packages/types
 COPY packages/config packages/config
 COPY packages/ui packages/ui
 COPY apps/web apps/web
-RUN pnpm --filter @smartcode/web build
+
+# Diagnostic output makes the build-time value explicit.
+RUN echo "BUILD NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}" \
+    && pnpm --filter @smartcode/web build
 
 FROM node:20-alpine AS runner
 WORKDIR /repo
+
 ENV NODE_ENV=production
-# pnpm IS needed here - CMD below invokes it directly (unlike the API
-# runner, which calls `node` directly and needs no pnpm at all).
+
+# pnpm is required by the production CMD.
 RUN npm install -g pnpm@9.15.9 \
     && test "$(pnpm --version)" = "9.15.9" \
     && echo "pnpm 9.15.9 verified"
+
 COPY --from=build /repo /repo
+
 EXPOSE 3000
+
 CMD ["pnpm", "--filter", "@smartcode/web", "start"]

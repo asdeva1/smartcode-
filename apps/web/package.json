@@ -1,41 +1,48 @@
-{
-  "name": "@smartcode/web",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "next": "^14.2.15",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "@mui/material": "^6.1.5",
-    "@mui/icons-material": "^6.1.5",
-    "@emotion/react": "^11.13.3",
-    "@emotion/styled": "^11.13.0",
-    "@tanstack/react-query": "^5.59.9",
-    "zustand": "^5.0.0",
-    "react-hook-form": "^7.53.0",
-    "@hookform/resolvers": "^3.9.0",
-    "zod": "^3.23.8",
-    "lucide-react": "^0.451.0",
-    "@smartcode/ui": "workspace:*",
-    "@smartcode/types": "workspace:*",
-    "@smartcode/config": "workspace:*"
-  },
-  "devDependencies": {
-    "@types/node": "^20.16.10",
-    "@types/react": "^18.3.11",
-    "@types/react-dom": "^18.3.0",
-    "typescript": "^5.6.3",
-    "tailwindcss": "^3.4.13",
-    "postcss": "^8.4.47",
-    "autoprefixer": "^10.4.20",
-    "eslint": "^8.57.1",
-    "eslint-config-next": "^14.2.15"
-  }
+﻿{
+    "name":  "@smartcode/web",
+    "version":  "0.1.0",
+    "private":  true,
+    "scripts":  {
+                    "dev":  "next dev",
+                    "build":  "next build",
+                    "start":  "next start",
+                    "lint":  "next lint",
+                    "typecheck":  "tsc --noEmit"
+                },
+    "dependencies":  {
+                         "@emotion/react":  "^11.13.3",
+                         "@emotion/styled":  "^11.13.0",
+                         "@hookform/resolvers":  "^3.9.0",
+                         "@mui/icons-material":  "^6.1.5",
+                         "@mui/material":  "^6.1.5",
+                         "@smartcode/config":  "workspace:*",
+                         "@smartcode/types":  "workspace:*",
+                         "@smartcode/ui":  "workspace:*",
+                         "@tanstack/react-query":  "^5.59.9",
+                         "lucide-react":  "^0.451.0",
+                         "next":  "^14.2.15",
+                         "react":  "^18.3.1",
+                         "react-dom":  "^18.3.1",
+                         "react-hook-form":  "^7.53.0",
+                         "zod":  "^3.23.8",
+                         "zustand":  "^5.0.0"
+                     },
+    "devDependencies":  {
+                            "@testing-library/dom":  "^10.4.2",
+                            "@testing-library/jest-dom":  "^6.9.1",
+                            "@testing-library/react":  "^16.3.3",
+                            "@testing-library/user-event":  "^14.6.7",
+                            "@types/jest":  "^29.5.14",
+                            "@types/node":  "^20.16.10",
+                            "@types/react":  "^18.3.11",
+                            "@types/react-dom":  "^18.3.0",
+                            "autoprefixer":  "^10.4.20",
+                            "eslint":  "^8.57.1",
+                            "eslint-config-next":  "^14.2.15",
+                            "jest":  "^29.7.0",
+                            "jest-environment-jsdom":  "^29.7.0",
+                            "postcss":  "^8.4.47",
+                            "tailwindcss":  "^3.4.13",
+                            "typescript":  "^5.6.3"
+                        }
 }

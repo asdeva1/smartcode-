@@ -1,0 +1,170 @@
+import * as React from 'react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ToastProvider } from '@smartcode/ui';
+import TeamLeadsPage from './page';
+import { apiFetch } from '@/lib/api-client';
+
+jest.mock('@/lib/api-client', () => ({
+  apiFetch: jest.fn(),
+  ApiError: class ApiError extends Error {},
+}));
+
+const mockedApiFetch = apiFetch as jest.MockedFunction<typeof apiFetch>;
+
+const sampleTeamLead = {
+  id: 'tl-1',
+  employeeId: 'EMP0100',
+  loginName: 'jane.doe',
+  email: 'jane.doe@smartclues.local',
+  fullName: 'Jane Doe',
+  role: 'TEAM_LEAD' as const,
+  isActive: true,
+  createdAt: '2026-01-15T00:00:00.000Z',
+  team: null,
+};
+
+function renderPage() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>
+        <TeamLeadsPage />
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+}
+
+/** Routes the mocked apiFetch by path prefix, the way the real endpoints are structured. */
+function mockApi(handlers: { teamLeads?: any; teams?: any }) {
+  mockedApiFetch.mockImplementation((path: string) => {
+    if (path.startsWith('/manager/team-leads')) return Promise.resolve(handlers.teamLeads);
+    if (path.startsWith('/teams')) return Promise.resolve(handlers.teams ?? []);
+    return Promise.reject(new Error(`Unhandled path in test: ${path}`));
+  });
+}
+
+describe('TeamLeadsPage', () => {
+  beforeEach(() => {
+    mockedApiFetch.mockReset();
+  });
+
+  it('loads and displays Team Leads in the table', async () => {
+    mockApi({
+      teamLeads: { data: [sampleTeamLead], total: 1, page: 1, pageSize: 25 },
+      teams: [],
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Jane Doe')).toBeInTheDocument();
+    expect(screen.getByText('EMP0100')).toBeInTheDocument();
+    expect(screen.getByText('jane.doe')).toBeInTheDocument();
+    expect(screen.getByText('Active')).toBeInTheDocument();
+  });
+
+  it('shows the empty state when there are no Team Leads', async () => {
+    mockApi({ teamLeads: { data: [], total: 0, page: 1, pageSize: 25 }, teams: [] });
+
+    renderPage();
+
+    expect(await screen.findByText('No Team Leads found')).toBeInTheDocument();
+    expect(
+      screen.getByText(/create your first team lead account to start building your production team/i),
+    ).toBeInTheDocument();
+  });
+
+  it('validates the Create Team Lead form and blocks submission until valid', async () => {
+    mockApi({ teamLeads: { data: [], total: 0, page: 1, pageSize: 25 }, teams: [] });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /create team lead/i }));
+    const dialog = await screen.findByRole('dialog');
+
+    await user.click(within(dialog).getByRole('button', { name: /create team lead/i }));
+
+    await waitFor(() => {
+      expect(within(dialog).getByText(/employee id is required/i)).toBeInTheDocument();
+      expect(within(dialog).getByText(/full name is required/i)).toBeInTheDocument();
+    });
+    // Only the list call should have happened - never a POST, since validation blocked it.
+    expect(mockedApiFetch).not.toHaveBeenCalledWith('/manager/team-leads', expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('creates a Team Lead and refreshes the list on success', async () => {
+    mockApi({ teamLeads: { data: [], total: 0, page: 1, pageSize: 25 }, teams: [] });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /create team lead/i }));
+    const dialog = await screen.findByRole('dialog');
+
+    await user.type(within(dialog).getByLabelText(/employee id/i), 'EMP0200');
+    await user.type(within(dialog).getByLabelText(/full name/i), 'New Lead');
+    await user.type(within(dialog).getByLabelText(/login name/i), 'new.lead');
+    await user.type(within(dialog).getByLabelText(/email/i), 'new.lead@smartclues.local');
+    await user.type(within(dialog).getByLabelText(/^password/i), 'SuperSecret123!');
+    await user.type(within(dialog).getByLabelText(/confirm password/i), 'SuperSecret123!');
+
+    // After a successful create, the list refetches - simulate that here.
+    mockedApiFetch.mockImplementation((path: string, options?: RequestInit) => {
+      if (path === '/manager/team-leads' && options?.method === 'POST') {
+        return Promise.resolve({ ...sampleTeamLead, id: 'tl-new' });
+      }
+      if (path.startsWith('/manager/team-leads')) {
+        return Promise.resolve({ data: [{ ...sampleTeamLead, id: 'tl-new', fullName: 'New Lead' }], total: 1, page: 1, pageSize: 25 });
+      }
+      if (path.startsWith('/teams')) return Promise.resolve([]);
+      return Promise.reject(new Error('unhandled'));
+    });
+
+    await user.click(within(dialog).getByRole('button', { name: /create team lead/i }));
+
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalledWith(
+        '/manager/team-leads',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+    expect(await screen.findByText('New Lead')).toBeInTheDocument();
+  });
+
+  it('asks for confirmation before deactivating, and only calls the API after confirming', async () => {
+    mockApi({
+      teamLeads: { data: [sampleTeamLead], total: 1, page: 1, pageSize: 25 },
+      teams: [],
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('Jane Doe');
+    await user.click(screen.getByRole('button', { name: '' })); // row action menu icon button
+    await user.click(await screen.findByText('Deactivate'));
+
+    const confirmDialog = await screen.findByText(/will no longer be able to log in/i);
+    expect(confirmDialog).toBeInTheDocument();
+    // Not yet called - confirmation hasn't been given.
+    expect(mockedApiFetch).not.toHaveBeenCalledWith(
+      expect.stringContaining('/deactivate'),
+      expect.anything(),
+    );
+
+    mockedApiFetch.mockImplementation((path: string) => {
+      if (path === '/users/tl-1/deactivate') return Promise.resolve({ ...sampleTeamLead, isActive: false });
+      if (path.startsWith('/manager/team-leads')) {
+        return Promise.resolve({ data: [{ ...sampleTeamLead, isActive: false }], total: 1, page: 1, pageSize: 25 });
+      }
+      return Promise.resolve([]);
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Deactivate' }));
+
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalledWith('/users/tl-1/deactivate', expect.objectContaining({ method: 'PATCH' }));
+    });
+  });
+});

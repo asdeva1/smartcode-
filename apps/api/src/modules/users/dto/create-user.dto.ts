@@ -10,6 +10,11 @@ export class CreateUserDto {
   @ApiProperty()
   @IsString()
   @MinLength(1)
+  fullName!: string;
+
+  @ApiProperty()
+  @IsString()
+  @MinLength(1)
   loginName!: string;
 
   @ApiProperty()

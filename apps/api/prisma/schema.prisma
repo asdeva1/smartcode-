@@ -55,6 +55,7 @@ model User {
   employeeId      String   @unique
   loginName       String   @unique
   email           String   @unique
+  fullName        String?  // nullable to preserve existing seeded rows created before this field existed; required at the DTO level for all new user creation going forward
   passwordHash    String
   role            RoleName
   isActive        Boolean  @default(true)
