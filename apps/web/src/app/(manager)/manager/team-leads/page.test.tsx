@@ -130,6 +130,21 @@ describe('TeamLeadsPage', () => {
         expect.objectContaining({ method: 'POST' }),
       );
     });
+    // The body must match CreateTeamLeadDto exactly - the API rejects
+    // undeclared fields (forbidNonWhitelisted), so confirmPassword and
+    // teamId both have to be fields the DTO declares.
+    const postCall = mockedApiFetch.mock.calls.find(
+      ([path, options]) => path === '/manager/team-leads' && options?.method === 'POST',
+    );
+    expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
+      employeeId: 'EMP0200',
+      fullName: 'New Lead',
+      loginName: 'new.lead',
+      email: 'new.lead@smartclues.local',
+      password: 'SuperSecret123!',
+      confirmPassword: 'SuperSecret123!',
+      teamId: null,
+    });
     expect(await screen.findByText('New Lead')).toBeInTheDocument();
   });
 

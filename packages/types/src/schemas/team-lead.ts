@@ -5,7 +5,7 @@ import { z } from 'zod';
  * (see apps/api/src/modules/users/dto/create-user.dto.ts) so a frontend
  * validation failure and a backend one always agree.
  */
-const PasswordSchema = z.string().min(8, 'Password must be at least 8 characters');
+export const PasswordSchema = z.string().min(8, 'Password must be at least 8 characters');
 
 export const CreateTeamLeadSchema = z
   .object({

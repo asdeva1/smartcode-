@@ -6,6 +6,9 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { CreateTeamLeadDto } from './dto/create-team-lead.dto';
 import { UpdateTeamLeadDto } from './dto/update-team-lead.dto';
 import { ListTeamLeadsDto } from './dto/list-team-leads.dto';
+import { CreateAuditorDto } from './dto/create-auditor.dto';
+import { UpdateAuditorDto } from './dto/update-auditor.dto';
+import { ListAuditorsDto } from './dto/list-auditors.dto';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -45,8 +48,26 @@ export class UsersController {
   @Post('manager/auditors')
   @Roles('MANAGER')
   @ApiOperation({ summary: 'Manager creates an Auditor' })
-  createAuditor(@CurrentUser() caller: AuthUser, @Body() dto: CreateUserDto) {
-    return this.usersService.createWithRole(caller, 'AUDITOR', dto);
+  createAuditor(@CurrentUser() caller: AuthUser, @Body() dto: CreateAuditorDto) {
+    return this.usersService.createAuditor(caller, dto);
+  }
+
+  @Get('manager/auditors')
+  @Roles('MANAGER')
+  @ApiOperation({ summary: 'Manager lists Auditors - paginated, searchable' })
+  listAuditors(@CurrentUser() caller: AuthUser, @Query() query: ListAuditorsDto) {
+    return this.usersService.findAuditors(caller, query);
+  }
+
+  @Patch('manager/auditors/:id')
+  @Roles('MANAGER')
+  @ApiOperation({ summary: 'Manager edits an Auditor account' })
+  updateAuditor(
+    @CurrentUser() caller: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateAuditorDto,
+  ) {
+    return this.usersService.updateAuditor(caller, id, dto);
   }
 
   @Post('team-leads/coders')

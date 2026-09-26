@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsUUID } from 'class-validator';
+import { IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import { CreateUserDto } from './create-user.dto';
+import { MatchesPassword } from './matches-password.validator';
 
 /**
  * Team assignment is specific to Team Lead creation - coders auto-inherit
@@ -10,6 +11,17 @@ import { CreateUserDto } from './create-user.dto';
  * creation endpoints.
  */
 export class CreateTeamLeadDto extends CreateUserDto {
+  /**
+   * Sent by the Create Team Lead form. Validated here (required, must
+   * equal password) and stripped in UsersService.createTeamLead - never
+   * persisted.
+   */
+  @ApiProperty()
+  @IsString()
+  @MinLength(1, { message: 'Confirm password is required' })
+  @MatchesPassword()
+  confirmPassword!: string;
+
   @ApiProperty({ required: false, description: 'Existing Team to assign this Team Lead to lead' })
   @IsOptional()
   @IsUUID()

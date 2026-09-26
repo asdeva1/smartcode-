@@ -1,8 +1,9 @@
 import { Test } from '@nestjs/testing';
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, ValidationPipe } from '@nestjs/common';
 import type { AuthUser } from '@smartcode/types';
 import { UsersService } from './users.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CreateTeamLeadDto } from './dto/create-team-lead.dto';
 
 /**
  * Exercises UsersService.createWithRole directly - the actual code path
@@ -285,5 +286,162 @@ describe('UsersService - Team Lead management', () => {
     expect(prisma.auditLog.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ action: 'TEAM_LEAD_UPDATED' }) }),
     );
+  });
+});
+
+/**
+ * Create Team Lead - confirmPassword contract. The web form sends
+ * confirmPassword (and teamId, possibly null); these tests run the DTO
+ * through a ValidationPipe configured exactly like main.ts
+ * (whitelist + forbidNonWhitelisted + transform), so an undeclared field
+ * would fail here the same way it would fail with HTTP 400 in production.
+ */
+describe('Create Team Lead - confirmPassword', () => {
+  const pipe = new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true });
+  const toDto = (body: Record<string, unknown>) =>
+    pipe.transform(body, { type: 'body', metatype: CreateTeamLeadDto }) as Promise<CreateTeamLeadDto>;
+  const messagesFor = async (body: Record<string, unknown>): Promise<string[]> => {
+    try {
+      await toDto(body);
+      return [];
+    } catch (e) {
+      expect(e).toBeInstanceOf(BadRequestException);
+      return ((e as BadRequestException).getResponse() as { message: string[] }).message;
+    }
+  };
+
+  const TEAM_ID = '7b0c7f7e-3a5b-4c1e-9d2a-1f2e3d4c5b6a';
+
+  /** Exactly the shape CreateTeamLeadDialog submits. */
+  const formPayload = {
+    employeeId: 'EMP0500',
+    fullName: 'Tara Lead',
+    loginName: 'tara.lead',
+    email: 'tara.lead@smartclues.local',
+    password: 'SuperSecret123!',
+    confirmPassword: 'SuperSecret123!',
+    teamId: null as string | null,
+  };
+
+  const managerCaller: AuthUser = {
+    id: 'manager-1',
+    employeeId: 'EMP0001',
+    loginName: 'manager.admin',
+    email: 'm@smartclues.local',
+    role: 'MANAGER',
+    teamId: null,
+    isActive: true,
+  };
+
+  describe('DTO validation (production ValidationPipe settings)', () => {
+    it('accepts the full form payload including confirmPassword and a null teamId', async () => {
+      const dto = await toDto(formPayload);
+      expect(dto).toBeInstanceOf(CreateTeamLeadDto);
+      expect(dto.confirmPassword).toBe('SuperSecret123!');
+    });
+
+    it('accepts the full form payload with a team selected', async () => {
+      await expect(toDto({ ...formPayload, teamId: TEAM_ID })).resolves.toMatchObject({ teamId: TEAM_ID });
+    });
+
+    it('rejects a password / confirmPassword mismatch', async () => {
+      expect(await messagesFor({ ...formPayload, confirmPassword: 'Different123!' })).toEqual([
+        'Passwords do not match',
+      ]);
+    });
+
+    it('rejects a missing confirmPassword', async () => {
+      const { confirmPassword: _omit, ...withoutConfirm } = formPayload;
+      expect(await messagesFor(withoutConfirm)).toEqual(
+        expect.arrayContaining(['Passwords do not match', 'confirmPassword must be a string']),
+      );
+    });
+
+    it('keeps the existing password policy - a short password is rejected even when both fields match', async () => {
+      expect(await messagesFor({ ...formPayload, password: 'short', confirmPassword: 'short' })).toEqual([
+        'Password must be at least 8 characters',
+      ]);
+    });
+
+    it('still rejects undeclared fields (forbidNonWhitelisted is not weakened)', async () => {
+      expect(await messagesFor({ ...formPayload, role: 'MANAGER' })).toEqual(['property role should not exist']);
+    });
+  });
+
+  describe('UsersService.createTeamLead', () => {
+    let service: UsersService;
+    let prisma: {
+      auditLog: { create: jest.Mock };
+      user: { findFirst: jest.Mock; create: jest.Mock; findUnique: jest.Mock };
+      team: { findUnique: jest.Mock; update: jest.Mock };
+    };
+
+    beforeEach(async () => {
+      prisma = {
+        auditLog: { create: jest.fn().mockResolvedValue({}) },
+        user: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockImplementation(({ data }) =>
+            Promise.resolve({ id: 'tl-new', isActive: true, createdAt: new Date('2026-03-01'), ...data }),
+          ),
+          findUnique: jest.fn(),
+        },
+        team: {
+          findUnique: jest.fn().mockResolvedValue({ id: TEAM_ID, name: 'Team Alpha', teamLeadId: null }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+      };
+      prisma.user.findUnique.mockImplementation(() => {
+        const created = prisma.user.create.mock.results[0]?.value;
+        return created.then((row: object) => ({ ...row, team: null }));
+      });
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [UsersService, { provide: PrismaService, useValue: prisma }],
+      }).compile();
+      service = moduleRef.get(UsersService);
+    });
+
+    it('creates a Team Lead from a validated form payload', async () => {
+      const result = await service.createTeamLead(managerCaller, await toDto(formPayload));
+
+      expect(prisma.user.create).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({
+        id: 'tl-new',
+        employeeId: 'EMP0500',
+        fullName: 'Tara Lead',
+        loginName: 'tara.lead',
+        email: 'tara.lead@smartclues.local',
+        role: 'TEAM_LEAD',
+        isActive: true,
+        team: null,
+      });
+      expect(result).not.toHaveProperty('passwordHash');
+      expect(result).not.toHaveProperty('confirmPassword');
+      expect(prisma.team.update).not.toHaveBeenCalled();
+    });
+
+    it('never persists or logs confirmPassword (nor the plaintext password)', async () => {
+      await service.createTeamLead(managerCaller, await toDto(formPayload));
+
+      const data = prisma.user.create.mock.calls[0][0].data;
+      expect(Object.keys(data).sort()).toEqual(
+        ['createdById', 'email', 'employeeId', 'fullName', 'loginName', 'passwordHash', 'role', 'teamId'].sort(),
+      );
+      expect(data).not.toHaveProperty('confirmPassword');
+      expect(data).not.toHaveProperty('password');
+      expect(data.passwordHash).not.toBe(formPayload.password);
+
+      const logged = JSON.stringify(prisma.auditLog.create.mock.calls);
+      expect(logged).not.toContain('confirmPassword');
+      expect(logged).not.toContain(formPayload.password);
+    });
+
+    it('still assigns the selected team (existing business rule unchanged)', async () => {
+      await service.createTeamLead(managerCaller, await toDto({ ...formPayload, teamId: TEAM_ID }));
+
+      expect(prisma.user.create.mock.calls[0][0].data).not.toHaveProperty('confirmPassword');
+      expect(prisma.team.update).toHaveBeenCalledWith({ where: { id: TEAM_ID }, data: { teamLeadId: 'tl-new' } });
+    });
   });
 });

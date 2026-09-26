@@ -6,6 +6,9 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { CreateTeamLeadDto } from './dto/create-team-lead.dto';
 import { UpdateTeamLeadDto } from './dto/update-team-lead.dto';
 import { ListTeamLeadsDto } from './dto/list-team-leads.dto';
+import { CreateAuditorDto } from './dto/create-auditor.dto';
+import { UpdateAuditorDto } from './dto/update-auditor.dto';
+import { ListAuditorsDto } from './dto/list-auditors.dto';
 
 @Injectable()
 export class UsersService {
@@ -95,7 +98,9 @@ export class UsersService {
       }
     }
 
-    const { teamId, ...userDto } = dto;
+    // confirmPassword was already checked by CreateTeamLeadDto; it is
+    // dropped here so it can never reach persistence.
+    const { teamId, confirmPassword: _confirm, ...userDto } = dto;
     const user = await this.createWithRole(caller, 'TEAM_LEAD', userDto);
 
     if (teamId) {
@@ -285,6 +290,123 @@ export class UsersService {
       isActive: user.isActive,
       createdAt: user.createdAt,
       team: user.team ?? null,
+    };
+  }
+
+  /**
+   * Auditor creation - createWithRole already enforces the hierarchy
+   * (only MANAGER may create AUDITOR), uniqueness of login name /
+   * employee ID / email, password hashing and audit logging. This only
+   * drops confirmPassword (already checked by CreateAuditorDto) and
+   * shapes the response.
+   */
+  async createAuditor(caller: AuthUser, dto: CreateAuditorDto) {
+    const { confirmPassword: _confirm, ...userDto } = dto;
+    const user = await this.createWithRole(caller, 'AUDITOR', userDto);
+    return this.toAuditorDto(user);
+  }
+
+  /** Manager-only, paginated, searchable list restricted to role AUDITOR. */
+  async findAuditors(caller: AuthUser, query: ListAuditorsDto) {
+    if (caller.role !== 'MANAGER') {
+      throw new ForbiddenException('Only a Manager can list Auditors');
+    }
+
+    const where: Record<string, unknown> = { role: 'AUDITOR' as const };
+    const search = query.search?.trim();
+    if (search) {
+      where.OR = [
+        { fullName: { contains: search, mode: 'insensitive' } },
+        { loginName: { contains: search, mode: 'insensitive' } },
+        { employeeId: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [rows, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return {
+      data: rows.map((r: any) => this.toAuditorDto(r)),
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+    };
+  }
+
+  async updateAuditor(caller: AuthUser, id: string, dto: UpdateAuditorDto) {
+    if (caller.role !== 'MANAGER') {
+      throw new ForbiddenException('Only a Manager can edit an Auditor');
+    }
+
+    const target = await this.findAuditorById(id);
+
+    if (dto.employeeId || dto.email) {
+      const conflict = await this.prisma.user.findFirst({
+        where: {
+          id: { not: id },
+          OR: [
+            ...(dto.employeeId ? [{ employeeId: dto.employeeId }] : []),
+            ...(dto.email ? [{ email: dto.email }] : []),
+          ],
+        },
+      });
+      if (conflict) {
+        throw new ConflictException('Another user already has this employee ID or email');
+      }
+    }
+
+    // Explicit field list - loginName and role can never be changed here.
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: {
+        ...(dto.employeeId !== undefined ? { employeeId: dto.employeeId } : {}),
+        ...(dto.fullName !== undefined ? { fullName: dto.fullName } : {}),
+        ...(dto.email !== undefined ? { email: dto.email } : {}),
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: caller.id,
+        role: caller.role,
+        action: 'USER_UPDATED',
+        entity: 'User',
+        entityId: id,
+        before: { fullName: target.fullName, email: target.email, employeeId: target.employeeId },
+        after: { fullName: updated.fullName, email: updated.email, employeeId: updated.employeeId },
+      },
+    });
+
+    return this.toAuditorDto(updated);
+  }
+
+  private async findAuditorById(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user || user.role !== 'AUDITOR') {
+      throw new NotFoundException('Auditor not found');
+    }
+    return user;
+  }
+
+  /** Only the fields the Auditor table needs - never passwordHash or login-security fields. */
+  private toAuditorDto(user: any) {
+    return {
+      id: user.id,
+      employeeId: user.employeeId,
+      loginName: user.loginName,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      isActive: user.isActive,
+      createdAt: user.createdAt,
     };
   }
 }
