@@ -3,9 +3,15 @@ import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
+import { CommonModule } from './common/common.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { TeamsModule } from './modules/teams/teams.module';
+import { ProjectsModule } from './modules/projects/projects.module';
+import { ProductionModule } from './modules/production/production.module';
+import { ChartsModule } from './modules/charts/charts.module';
+import { AuditsModule } from './modules/audits/audits.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { HealthModule } from './modules/health/health.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { envValidationSchema } from './config/env.validation';
@@ -23,9 +29,15 @@ import { envValidationSchema } from './config/env.validation';
       },
     ]),
     PrismaModule,
+    CommonModule,
     AuthModule,
     UsersModule,
     TeamsModule,
+    ProjectsModule,
+    ProductionModule,
+    ChartsModule,
+    AuditsModule,
+    ReportsModule,
     HealthModule,
   ],
   providers: [

@@ -4,6 +4,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import type { AuthUser } from '@smartcode/types';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { resolveTeamId } from '../resolve-team-id';
 
 /**
  * Verifies the JWT signature/expiry (passport-jwt's job), then re-checks
@@ -29,7 +30,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: { sub: string; role: string }): Promise<AuthUser> {
-    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      include: { leadsTeam: { select: { id: true } } },
+    });
     if (!user || !user.isActive) {
       throw new UnauthorizedException('User not found or inactive');
     }
@@ -38,8 +42,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       employeeId: user.employeeId,
       loginName: user.loginName,
       email: user.email,
+      fullName: user.fullName,
       role: user.role as AuthUser['role'],
-      teamId: user.teamId,
+      teamId: resolveTeamId(user),
       isActive: user.isActive,
     };
   }

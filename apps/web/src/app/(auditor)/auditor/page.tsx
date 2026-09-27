@@ -1,22 +1,55 @@
 'use client';
-import Grid from '@mui/material/Grid';
-import { PageHeader, MetricCard } from '@smartcode/ui';
+import * as React from 'react';
+import { useRouter } from 'next/navigation';
+import Paper from '@mui/material/Paper';
+import Stack from '@mui/material/Stack';
+import { Search } from 'lucide-react';
+import { ChartIdSchema } from '@smartcode/types';
+import { Button, Input, PageHeader } from '@smartcode/ui';
+import { DashboardMetrics } from '@/components/data/DashboardMetrics';
+import { WelcomeAndQuickActions } from '@/components/data/QuickActions';
 
 export default function AuditorDashboardPage() {
+  const router = useRouter();
+  const [chartId, setChartId] = React.useState('');
+  const [error, setError] = React.useState<string | null>(null);
+
+  const go = (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsed = ChartIdSchema.safeParse(chartId);
+    if (!parsed.success) return setError(parsed.error.issues[0].message);
+    router.push(`/auditor/audit-entry?chartId=${encodeURIComponent(parsed.data)}`);
+  };
+
   return (
     <>
       <PageHeader title="My Dashboard" description="Your audit overview" />
-      <Grid container spacing={2}>
-        <Grid item xs={12} sm={6} md={4}>
-          <MetricCard label="Audit Queue" value="—" />
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <MetricCard label="Completed Today" value="—" />
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <MetricCard label="Review Required" value="—" />
-        </Grid>
-      </Grid>
+      <WelcomeAndQuickActions
+        actions={[
+          { label: 'Audit Queue', href: '/auditor/queue' },
+          { label: 'Audit Entry', href: '/auditor/audit-entry' },
+          { label: 'My Audits', href: '/auditor/audits' },
+          { label: 'Reports', href: '/auditor/reports' },
+        ]}
+      />
+      <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+        <form onSubmit={go} noValidate>
+          <Stack direction="row" spacing={1} alignItems="flex-start">
+            <Input
+              label="Quick search by Chart ID"
+              value={chartId}
+              onChange={(e) => setChartId(e.target.value)}
+              error={!!error}
+              helperText={error ?? ' '}
+              sx={{ maxWidth: 320 }}
+            />
+            <Button type="submit" startIcon={<Search size={16} />}>
+              Open
+            </Button>
+          </Stack>
+        </form>
+      </Paper>
+      <DashboardMetrics />
     </>
   );
 }

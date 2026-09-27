@@ -32,6 +32,7 @@ export const NAVIGATION: Record<Role, NavItem[]> = {
     { label: 'My Team', href: '/team-lead/team', icon: 'Users' },
     { label: 'Coders', href: '/team-lead/coders', icon: 'UserCog' },
     { label: 'Production', href: '/team-lead/production', icon: 'ClipboardList' },
+    { label: 'Audits', href: '/team-lead/audits', icon: 'ClipboardCheck' },
     { label: 'Charts', href: '/team-lead/charts', icon: 'FileText' },
     { label: 'Productivity', href: '/team-lead/productivity', icon: 'Gauge' },
     { label: 'Reports', href: '/team-lead/reports', icon: 'BarChart3' },
@@ -40,6 +41,7 @@ export const NAVIGATION: Record<Role, NavItem[]> = {
     { label: 'Dashboard', href: '/coder', icon: 'LayoutDashboard' },
     { label: 'My Production', href: '/coder/production', icon: 'ClipboardList' },
     { label: 'Add Production', href: '/coder/production/new', icon: 'FilePlus' },
+    { label: 'My Charts', href: '/coder/charts', icon: 'FileText' },
     { label: 'Reports', href: '/coder/reports', icon: 'BarChart3' },
   ],
   AUDITOR: [
@@ -47,6 +49,7 @@ export const NAVIGATION: Record<Role, NavItem[]> = {
     { label: 'Audit Queue', href: '/auditor/queue', icon: 'ListChecks' },
     { label: 'Audit Entry', href: '/auditor/audit-entry', icon: 'FilePlus' },
     { label: 'View Audits', href: '/auditor/audits', icon: 'ClipboardCheck' },
+    { label: 'Charts', href: '/auditor/charts', icon: 'FileText' },
     { label: 'Reports', href: '/auditor/reports', icon: 'BarChart3' },
   ],
 };

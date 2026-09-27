@@ -1,22 +1,23 @@
 'use client';
-import Grid from '@mui/material/Grid';
-import { PageHeader, MetricCard } from '@smartcode/ui';
+import * as React from 'react';
+import { PageHeader } from '@smartcode/ui';
+import { DashboardMetrics } from '@/components/data/DashboardMetrics';
+import { WelcomeAndQuickActions } from '@/components/data/QuickActions';
 
 export default function TeamLeadDashboardPage() {
   return (
     <>
       <PageHeader title="Team Lead Dashboard" description="Your team's overview" />
-      <Grid container spacing={2}>
-        <Grid item xs={12} sm={6} md={4}>
-          <MetricCard label="Active Coders" value="—" />
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <MetricCard label="Charts In Progress" value="—" />
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <MetricCard label="Completed Today" value="—" />
-        </Grid>
-      </Grid>
+      <WelcomeAndQuickActions
+        actions={[
+          { label: 'Manage Coders', href: '/team-lead/coders' },
+          { label: 'Team Production', href: '/team-lead/production' },
+          { label: 'Audits', href: '/team-lead/audits' },
+          { label: 'Charts', href: '/team-lead/charts' },
+          { label: 'Reports', href: '/team-lead/reports' },
+        ]}
+      />
+      <DashboardMetrics />
     </>
   );
 }

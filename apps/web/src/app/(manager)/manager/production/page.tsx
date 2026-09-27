@@ -1,12 +1,17 @@
 'use client';
-import { PlaceholderPage } from '@/components/shell/PlaceholderPage';
+import * as React from 'react';
+import { PageHeader, Breadcrumb } from '@smartcode/ui';
+import { ProductionTable } from '@/features/production/ProductionTable';
 
 export default function Page() {
   return (
-    <PlaceholderPage
-      title="Production"
-      description="All production entries across teams."
-      breadcrumbItems={[{ label: 'Manager', href: '/manager' }, { label: 'Production' }]}
-    />
+    <>
+      <PageHeader
+        title="Production"
+        description="All production entries across teams."
+        breadcrumb={<Breadcrumb items={[{ label: 'Manager', href: '/manager' }, { label: 'Production' }]} />}
+      />
+      <ProductionTable role="MANAGER" />
+    </>
   );
 }

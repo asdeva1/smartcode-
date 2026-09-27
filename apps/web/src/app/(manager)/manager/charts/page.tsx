@@ -1,12 +1,17 @@
 'use client';
-import { PlaceholderPage } from '@/components/shell/PlaceholderPage';
+import * as React from 'react';
+import { PageHeader, Breadcrumb } from '@smartcode/ui';
+import { ChartRepository } from '@/features/charts/ChartRepository';
 
 export default function Page() {
   return (
-    <PlaceholderPage
-      title="Charts"
-      description="Organization-wide chart index."
-      breadcrumbItems={[{ label: 'Manager', href: '/manager' }, { label: 'Charts' }]}
-    />
+    <>
+      <PageHeader
+        title="Charts"
+        description="All charts with production and audit history."
+        breadcrumb={<Breadcrumb items={[{ label: 'Manager', href: '/manager' }, { label: 'Charts' }]} />}
+      />
+      <ChartRepository role="MANAGER" />
+    </>
   );
 }

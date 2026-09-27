@@ -19,6 +19,8 @@ export const AuthUserSchema = z.object({
   employeeId: z.string(),
   loginName: z.string(),
   email: z.string().email(),
+  /** Display name from the account; optional so older tokens/tests without it stay valid. */
+  fullName: z.string().nullable().optional(),
   role: z.enum(ROLES),
   teamId: z.string().uuid().nullable(),
   isActive: z.boolean(),

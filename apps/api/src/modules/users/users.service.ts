@@ -9,6 +9,10 @@ import { ListTeamLeadsDto } from './dto/list-team-leads.dto';
 import { CreateAuditorDto } from './dto/create-auditor.dto';
 import { UpdateAuditorDto } from './dto/update-auditor.dto';
 import { ListAuditorsDto } from './dto/list-auditors.dto';
+import { CreateCoderDto } from './dto/create-coder.dto';
+import { requireTeam } from '../../common/scope';
+import { writeAuditLog } from '../../common/audit-log';
+import { toCoderDto } from './coder.mapper';
 
 @Injectable()
 export class UsersService {
@@ -110,6 +114,28 @@ export class UsersService {
     return this.toTeamLeadDto(await this.findTeamLeadById(user.id));
   }
 
+  /**
+   * Team Lead creates a Coder on their own team. createWithRole enforces
+   * the hierarchy (only TEAM_LEAD may create CODER), uniqueness, hashing
+   * and audit logging, and assigns the caller's team. confirmPassword is
+   * validated by CreateCoderDto and never persisted.
+   */
+  async createCoder(caller: AuthUser, dto: CreateCoderDto) {
+    if (caller.role === 'TEAM_LEAD') requireTeam(caller);
+    const { confirmPassword: _confirm, isActive, ...userDto } = dto;
+    let user = await this.createWithRole(caller, 'CODER', userDto);
+    if (isActive === false) {
+      const updated = await this.prisma.user.update({ where: { id: user.id }, data: { isActive: false } });
+      await writeAuditLog(this.prisma, caller, 'USER_DEACTIVATED', 'User', user.id, {
+        before: { isActive: true },
+        after: { isActive: false, reason: 'created inactive' },
+      });
+      const { passwordHash: _omit, ...safe } = updated;
+      user = safe;
+    }
+    return toCoderDto(user);
+  }
+
   /** Scoped list — Manager sees all, TL sees own team, others see self only. */
   async findScoped(caller: AuthUser) {
     const where =
@@ -129,7 +155,12 @@ export class UsersService {
 
     const allowed =
       (caller.role === 'MANAGER' && (target.role === 'TEAM_LEAD' || target.role === 'AUDITOR')) ||
-      (caller.role === 'TEAM_LEAD' && target.role === 'CODER' && target.teamId === caller.teamId);
+      // caller.teamId must be non-null: a Team Lead without a team must
+      // never match an unassigned Coder through null === null.
+      (caller.role === 'TEAM_LEAD' &&
+        target.role === 'CODER' &&
+        caller.teamId !== null &&
+        target.teamId === caller.teamId);
 
     if (!allowed) {
       throw new ForbiddenException('You are not permitted to change this user\'s status');

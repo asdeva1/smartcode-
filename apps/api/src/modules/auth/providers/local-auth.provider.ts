@@ -5,6 +5,7 @@ import * as argon2 from 'argon2';
 import type { AuthUser, TokenPair } from '@smartcode/types';
 import { PrismaService } from '../../../prisma/prisma.service';
 import type { AuthProvider } from './auth-provider.interface';
+import { resolveTeamId } from '../resolve-team-id';
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
@@ -26,7 +27,10 @@ export class LocalAuthProvider implements AuthProvider {
   ) {}
 
   async validateCredentials(loginName: string, password: string): Promise<AuthUser | null> {
-    const user = await this.prisma.user.findUnique({ where: { loginName } });
+    const user = await this.prisma.user.findUnique({
+      where: { loginName },
+      include: { leadsTeam: { select: { id: true } } },
+    });
     if (!user || !user.isActive) return null;
 
     if (user.lockedUntil && user.lockedUntil > new Date()) {
@@ -132,8 +136,10 @@ export class LocalAuthProvider implements AuthProvider {
     employeeId: string;
     loginName: string;
     email: string;
+    fullName?: string | null;
     role: string;
     teamId: string | null;
+    leadsTeam?: { id: string } | null;
     isActive: boolean;
   }): AuthUser {
     return {
@@ -141,8 +147,9 @@ export class LocalAuthProvider implements AuthProvider {
       employeeId: user.employeeId,
       loginName: user.loginName,
       email: user.email,
+      fullName: user.fullName ?? null,
       role: user.role as AuthUser['role'],
-      teamId: user.teamId,
+      teamId: resolveTeamId(user),
       isActive: user.isActive,
     };
   }

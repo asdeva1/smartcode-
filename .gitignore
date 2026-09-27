@@ -12,3 +12,4 @@ coverage/
 .DS_Store
 prisma/migrations/**/migration.sql.bak
 .turbo/
+*.tsbuildinfo

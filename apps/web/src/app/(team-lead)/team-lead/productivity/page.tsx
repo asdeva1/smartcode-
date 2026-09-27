@@ -1,12 +1,17 @@
 'use client';
-import { PlaceholderPage } from '@/components/shell/PlaceholderPage';
+import * as React from 'react';
+import { PageHeader, Breadcrumb } from '@smartcode/ui';
+import { ReportsView } from '@/components/data/ReportsView';
 
 export default function Page() {
   return (
-    <PlaceholderPage
-      title="Productivity"
-      description="Charts Per Hour (CPH) for your team."
-      breadcrumbItems={[{ label: 'Team Lead', href: '/team-lead' }, { label: 'Productivity' }]}
-    />
+    <>
+      <PageHeader
+        title="Productivity"
+        description="Coder productivity from your team's current production (charts, pages, DOS, ICDs, errors)."
+        breadcrumb={<Breadcrumb items={[{ label: 'Team Lead', href: '/team-lead' }, { label: 'Productivity' }]} />}
+      />
+      <ReportsView reports={['coder-productivity', 'production-summary']} />
+    </>
   );
 }

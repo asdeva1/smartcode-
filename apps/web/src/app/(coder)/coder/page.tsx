@@ -1,22 +1,22 @@
 'use client';
-import Grid from '@mui/material/Grid';
-import { PageHeader, MetricCard } from '@smartcode/ui';
+import * as React from 'react';
+import { PageHeader } from '@smartcode/ui';
+import { DashboardMetrics } from '@/components/data/DashboardMetrics';
+import { WelcomeAndQuickActions } from '@/components/data/QuickActions';
 
 export default function CoderDashboardPage() {
   return (
     <>
       <PageHeader title="My Dashboard" description="Your production overview" />
-      <Grid container spacing={2}>
-        <Grid item xs={12} sm={6} md={4}>
-          <MetricCard label="My Production Today" value="—" />
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <MetricCard label="Pending Rework" value="—" />
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <MetricCard label="Completed This Week" value="—" />
-        </Grid>
-      </Grid>
+      <WelcomeAndQuickActions
+        actions={[
+          { label: 'Add Production', href: '/coder/production/new' },
+          { label: 'My Production', href: '/coder/production' },
+          { label: 'My Charts', href: '/coder/charts' },
+          { label: 'Reports', href: '/coder/reports' },
+        ]}
+      />
+      <DashboardMetrics />
     </>
   );
 }

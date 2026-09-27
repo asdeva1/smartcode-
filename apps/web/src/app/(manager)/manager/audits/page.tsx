@@ -1,12 +1,17 @@
 'use client';
-import { PlaceholderPage } from '@/components/shell/PlaceholderPage';
+import * as React from 'react';
+import { PageHeader, Breadcrumb } from '@smartcode/ui';
+import { AuditsTable } from '@/features/audits/AuditsTable';
 
 export default function Page() {
   return (
-    <PlaceholderPage
-      title="Audits"
-      description="All audit entries across teams."
-      breadcrumbItems={[{ label: 'Manager', href: '/manager' }, { label: 'Audit' }]}
-    />
+    <>
+      <PageHeader
+        title="Audit"
+        description="All audits. Resolve audits flagged Review Required."
+        breadcrumb={<Breadcrumb items={[{ label: 'Manager', href: '/manager' }, { label: 'Audit' }]} />}
+      />
+      <AuditsTable role="MANAGER" />
+    </>
   );
 }

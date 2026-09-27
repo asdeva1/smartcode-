@@ -2,7 +2,7 @@ import { Controller, Post, Get, Patch, Body, Param, Query, UseGuards } from '@ne
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import type { AuthUser } from '@smartcode/types';
 import { UsersService } from './users.service';
-import { CreateUserDto } from './dto/create-user.dto';
+import { CreateCoderDto } from './dto/create-coder.dto';
 import { CreateTeamLeadDto } from './dto/create-team-lead.dto';
 import { UpdateTeamLeadDto } from './dto/update-team-lead.dto';
 import { ListTeamLeadsDto } from './dto/list-team-leads.dto';
@@ -73,8 +73,8 @@ export class UsersController {
   @Post('team-leads/coders')
   @Roles('TEAM_LEAD')
   @ApiOperation({ summary: 'Team Lead creates a Coder, auto-assigned to their team' })
-  createCoder(@CurrentUser() caller: AuthUser, @Body() dto: CreateUserDto) {
-    return this.usersService.createWithRole(caller, 'CODER', dto);
+  createCoder(@CurrentUser() caller: AuthUser, @Body() dto: CreateCoderDto) {
+    return this.usersService.createCoder(caller, dto);
   }
 
   @Get('users')
