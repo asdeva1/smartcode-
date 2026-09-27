@@ -10,6 +10,7 @@ export interface ChartListParams {
   productionStatus?: string;
   auditState?: string;
   rework?: 'yes';
+  vendorId?: string;
 }
 
 export function useCharts(params: ChartListParams) {

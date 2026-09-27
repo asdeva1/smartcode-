@@ -40,6 +40,8 @@ describe('ProductionService', () => {
         update: jest.fn().mockResolvedValue({}),
         create: jest.fn(async ({ data }) => row({ ...data, id: 'p-new' })),
       },
+      // No Auditor rework linked unless a test says otherwise (see rework.workflow.ts).
+      rework: { findFirst: jest.fn().mockResolvedValue(null), update: jest.fn() },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
     prisma = {
@@ -53,6 +55,7 @@ describe('ProductionService', () => {
         aggregate: jest.fn().mockResolvedValue({ _max: { version: 1 } }),
         update: jest.fn(async ({ data }) => row(data)),
       },
+      rework: { findFirst: jest.fn().mockResolvedValue(null) },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
       $transaction: jest.fn(async (fn: any) => fn(tx)),
     };
@@ -222,6 +225,59 @@ describe('ProductionService', () => {
 
     it('does not let Auditors list production', async () => {
       await expect(service.list(auditor, q as any)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('Auditor rework linkage', () => {
+    it('starting rework on an Auditor-rejected version links the new version and marks the rework IN_PROGRESS', async () => {
+      tx.rework.findFirst.mockResolvedValueOnce({ id: 'rw-1', status: 'OPEN' });
+      tx.rework.update.mockResolvedValueOnce({ id: 'rw-1' });
+      await service.rework(coder, 'p-1');
+      expect(tx.rework.findFirst).toHaveBeenCalledWith({ where: { originalProductionId: 'p-1', status: 'OPEN' } });
+      expect(tx.rework.update).toHaveBeenCalledWith({ where: { id: 'rw-1' }, data: { reworkProductionId: 'p-new', status: 'IN_PROGRESS' } });
+      expect(tx.auditLog.create.mock.calls.map((c: any) => c[0].data.action)).toEqual(['REWORK_INITIATED', 'REWORK_STARTED']);
+    });
+
+    it('completing the correction version resolves the rework atomically and notifies Team Lead + Auditor', async () => {
+      prisma.productionEntry.findUnique.mockResolvedValueOnce(row({ status: 'IN_PROGRESS', version: 2, id: 'p-2' }));
+      prisma.rework.findFirst.mockResolvedValueOnce({ id: 'rw-1', chartId: 'CH-100', status: 'IN_PROGRESS', teamLeadId: 'tl-1', auditorId: 'aud-1' });
+      tx.productionEntry.update.mockResolvedValueOnce(row({ status: 'COMPLETED', version: 2, id: 'p-2' }));
+      tx.rework.update.mockResolvedValueOnce({});
+      tx.notification = { createMany: jest.fn().mockResolvedValue({ count: 1 }), updateMany: jest.fn().mockResolvedValue({ count: 1 }) };
+      await service.update(coder, 'p-2', { status: 'COMPLETED' });
+      expect(prisma.rework.findFirst).toHaveBeenCalledWith({ where: { reworkProductionId: 'p-2', status: 'IN_PROGRESS' } });
+      expect(prisma.productionEntry.update).not.toHaveBeenCalled(); // the transactional path was used
+      expect(tx.rework.update.mock.calls[0][0].data).toMatchObject({ status: 'RESOLVED', resolvedById: coder.id });
+      expect(tx.notification.createMany.mock.calls.map((c: any) => c[0].data[0].type)).toEqual(['REWORK_RESOLVED', 'REWORK_READY_FOR_REAUDIT']);
+      expect(tx.auditLog.create.mock.calls.map((c: any) => c[0].data.action)).toEqual(['PRODUCTION_UPDATED', 'REWORK_RESOLVED', 'REWORK_RESOLVED']);
+    });
+
+    it('does not look for a rework unless the edit completes the version', async () => {
+      prisma.productionEntry.findUnique.mockResolvedValueOnce(row({ status: 'IN_PROGRESS' }));
+      await service.update(coder, 'p-1', { pageCount: 3 });
+      expect(prisma.rework.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('vendor scope', () => {
+    const inV = { some: { vendorId: 'vendor-a', isActive: true } };
+    it('a Vendor account lists only its vendor\'s production (through the coder\'s team)', async () => {
+      await service.list({ ...manager, role: 'VENDOR', vendorId: 'vendor-a' }, { page: 1, pageSize: 25 } as any);
+      expect(prisma.productionEntry.findMany.mock.calls[0][0].where.AND[0]).toEqual({ coder: { team: { teamLead: { vendorAssignments: inV } } } });
+    });
+
+    it('a vendor filter narrows the Manager\'s list and can never widen a Team Lead\'s', async () => {
+      await service.list(teamLead, { page: 1, pageSize: 25, vendorId: 'vendor-a' } as any);
+      const and = prisma.productionEntry.findMany.mock.calls[0][0].where.AND;
+      expect(and[0]).toEqual({ coder: { teamId: TEAM } });
+      expect(and).toContainEqual({ coder: { team: { teamLead: { vendorAssignments: inV } } } });
+    });
+
+    it('a Vendor account cannot rework, cancel or edit production', async () => {
+      const v = { ...manager, role: 'VENDOR' as const, vendorId: 'vendor-a' };
+      await expect(service.update(v, 'p-1', { pageCount: 1 })).rejects.toThrow(ForbiddenException);
+      await expect(service.cancel(v, 'p-1')).rejects.toThrow(ForbiddenException);
+      await expect(service.rework(v, 'p-1')).rejects.toThrow(NotFoundException);
     });
   });
 });

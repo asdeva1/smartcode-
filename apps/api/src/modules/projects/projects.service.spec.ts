@@ -24,6 +24,8 @@ describe('ProjectsService', () => {
       team: { findUnique: jest.fn().mockResolvedValue({ id: 'team-1' }) },
       user: { findUnique: jest.fn().mockResolvedValue({ id: 'a', role: 'AUDITOR' }) },
       auditorProjectAssignment: { create: jest.fn().mockResolvedValue({ id: 'asg' }), findMany: jest.fn().mockResolvedValue([]) },
+      // No vendor assignments unless a test sets one (cross-vendor checks, vendor-scope.ts).
+      vendorAssignment: { findFirst: jest.fn().mockResolvedValue(null) },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
     const moduleRef = await Test.createTestingModule({ providers: [ProjectsService, { provide: PrismaService, useValue: prisma }] }).compile();

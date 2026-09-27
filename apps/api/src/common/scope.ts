@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import type { AuthUser } from '@smartcode/types';
 import { isNotFutureDate, isValidIsoDate } from '@smartcode/types';
+import { auditorProjectWhere, requireVendor, vendorAuditWhere, vendorChartWhere, vendorProductionWhere } from './vendor-scope';
 
 /** Team-scoped roles must actually have a team; null must never match null. */
 export function requireTeam(caller: AuthUser): string {
@@ -14,7 +15,9 @@ export function requireTeam(caller: AuthUser): string {
 /**
  * Row-level chart visibility (docs/09-BUSINESS-RULES.md "Chart Assignment"):
  * Manager all; Team Lead charts in their team's projects; Coder charts they
- * have submitted production against; Auditor charts in assigned projects.
+ * have submitted production against; Auditor charts in assigned projects
+ * (restricted to their vendor's projects when they belong to one); Vendor
+ * charts in its own vendor's projects.
  */
 export function chartScope(caller: AuthUser): Prisma.ChartWhereInput {
   switch (caller.role) {
@@ -25,13 +28,15 @@ export function chartScope(caller: AuthUser): Prisma.ChartWhereInput {
     case 'CODER':
       return { productionEntries: { some: { coderId: caller.id } } };
     case 'AUDITOR':
-      return { project: { auditorAssignments: { some: { auditorId: caller.id } } } };
+      return { project: auditorProjectWhere(caller) };
+    case 'VENDOR':
+      return vendorChartWhere(requireVendor(caller));
     default:
       throw new ForbiddenException();
   }
 }
 
-/** Production visibility: Manager all, Team Lead own team's coders, Coder own. Auditors use the Chart ID lookup. */
+/** Production visibility: Manager all, Team Lead own team's coders, Coder own, Vendor its teams' coders. Auditors use the Chart ID lookup. */
 export function productionScope(caller: AuthUser): Prisma.ProductionEntryWhereInput {
   switch (caller.role) {
     case 'MANAGER':
@@ -40,12 +45,14 @@ export function productionScope(caller: AuthUser): Prisma.ProductionEntryWhereIn
       return { coder: { teamId: requireTeam(caller) } };
     case 'CODER':
       return { coderId: caller.id };
+    case 'VENDOR':
+      return vendorProductionWhere(requireVendor(caller));
     default:
       throw new ForbiddenException('Your role cannot list production records');
   }
 }
 
-/** Audit visibility: Manager all, Team Lead own team's charts, Auditor own audits. Coders have no audit access. */
+/** Audit visibility: Manager all, Team Lead own team's charts, Auditor own audits, Vendor its projects' charts. Coders have no audit access. */
 export function auditScope(caller: AuthUser): Prisma.AuditEntryWhereInput {
   switch (caller.role) {
     case 'MANAGER':
@@ -54,6 +61,8 @@ export function auditScope(caller: AuthUser): Prisma.AuditEntryWhereInput {
       return { productionEntry: { chart: { project: { teamId: requireTeam(caller) } } } };
     case 'AUDITOR':
       return { auditorId: caller.id };
+    case 'VENDOR':
+      return vendorAuditWhere(requireVendor(caller));
     default:
       throw new ForbiddenException('Your role cannot view audit records');
   }

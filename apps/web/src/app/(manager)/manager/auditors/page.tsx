@@ -19,6 +19,7 @@ import {
   useToast,
 } from '@smartcode/ui';
 import { useAuditors, useSetAuditorActive } from '@/features/auditors/use-auditors';
+import { VendorFilter } from '@/components/data/VendorFilter';
 import { CreateAuditorDialog } from '@/features/auditors/CreateAuditorDialog';
 import { EditAuditorDialog } from '@/features/auditors/EditAuditorDialog';
 
@@ -30,6 +31,7 @@ export default function AuditorsPage() {
   const { showToast } = useToast();
   const [page, setPage] = React.useState(1);
   const [search, setSearch] = React.useState('');
+  const [vendorId, setVendorId] = React.useState('');
   const [createOpen, setCreateOpen] = React.useState(false);
   const [editTarget, setEditTarget] = React.useState<Auditor | null>(null);
   const [confirmTarget, setConfirmTarget] = React.useState<Auditor | null>(null);
@@ -39,6 +41,7 @@ export default function AuditorsPage() {
     page,
     pageSize: PAGE_SIZE,
     search: search || undefined,
+    vendorId: vendorId || undefined,
   });
   const setActive = useSetAuditorActive();
 
@@ -91,6 +94,13 @@ export default function AuditorsPage() {
           }}
           sx={{ minWidth: 260 }}
         />
+        <VendorFilter
+          value={vendorId}
+          onChange={(v) => {
+            setVendorId(v);
+            setPage(1);
+          }}
+        />
         <IconButton onClick={() => refetch()} aria-label="Refresh" disabled={isFetching}>
           <RefreshCw size={18} />
         </IconButton>
@@ -111,6 +121,7 @@ export default function AuditorsPage() {
               { key: 'fullName', header: 'Full Name', render: (r) => r.fullName ?? '—' },
               { key: 'loginName', header: 'Login Name', render: (r) => r.loginName },
               { key: 'email', header: 'Email', render: (r) => r.email },
+              { key: 'vendor', header: 'Vendor', render: (r) => r.vendor?.name ?? '—' },
               {
                 key: 'status',
                 header: 'Status',

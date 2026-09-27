@@ -11,7 +11,7 @@ import { ExportChartsDto, ListChartsDto } from './dto/list-charts.dto';
 @ApiTags('charts')
 @ApiBearerAuth()
 @UseGuards(RolesGuard)
-@Roles('MANAGER', 'TEAM_LEAD', 'CODER', 'AUDITOR')
+@Roles('MANAGER', 'TEAM_LEAD', 'CODER', 'AUDITOR', 'VENDOR')
 @Controller('charts')
 export class ChartsController {
   constructor(private readonly charts: ChartsService) {}
@@ -41,7 +41,7 @@ export class ChartsController {
   }
 
   @Get(':chartId/audit-history')
-  @Roles('MANAGER', 'TEAM_LEAD', 'AUDITOR')
+  @Roles('MANAGER', 'TEAM_LEAD', 'AUDITOR', 'VENDOR')
   @ApiOperation({ summary: 'Every audit ever recorded on a chart, newest first (re-audits preserved)' })
   auditHistory(@CurrentUser() caller: AuthUser, @Param('chartId') chartId: string) {
     return this.charts.auditHistory(caller, chartId);

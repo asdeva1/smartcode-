@@ -95,6 +95,8 @@ export interface ChartProductionLookup {
   openAuditId: string | null;
   /** The latest audit on this version if it is REJECTED - the re-audit target. */
   reauditTargetId: string | null;
+  /** Set when the current version is the Coder's correction of an Auditor rework. */
+  rework?: { id: string; status: string; reason: string; resolutionNote: string | null } | null;
 }
 
 export type AuditQueueState = 'PENDING_AUDIT' | 'IN_PROGRESS';
@@ -112,6 +114,8 @@ export interface AuditQueueItem {
   queueState: AuditQueueState;
   myAuditId: string | null;
   isReaudit: boolean;
+  /** Set when this version corrects an Auditor rework (ready for re-audit). */
+  rework?: { id: string; status: string; reason: string } | null;
 }
 
 export interface AuditQueueResponse {

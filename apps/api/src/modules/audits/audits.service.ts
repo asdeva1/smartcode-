@@ -30,7 +30,9 @@ import {
   requireTeam,
   toDate,
 } from '../../common/scope';
+import { auditorProjectWhere, vendorAuditWhere, vendorProjectWhere } from '../../common/vendor-scope';
 import { summarize } from '../users/coders.service';
+import { hasReworkReason, markReaudited, openRework, reworkReasonOrThrow, withdrawForOverturnedAudit } from '../rework/rework.workflow';
 import { AUDIT_EXPORT_COLUMNS, AUDIT_INCLUDE, auditExportRow, toAuditDto } from './audit.mapper';
 import {
   AuditQueueDto,
@@ -81,7 +83,13 @@ export class AuditsService {
       const assigned = await this.prisma.auditorProjectAssignment.findUnique({
         where: { auditorId_projectId: { auditorId: caller.id, projectId: chart.projectId } },
       });
-      return assigned ? chart : null;
+      if (!assigned) return null;
+      // A vendor Auditor works only inside their vendor, even if an old assignment says otherwise.
+      if (caller.vendorId) {
+        const inVendor = await this.prisma.project.count({ where: { id: chart.projectId, ...vendorProjectWhere(caller.vendorId) } });
+        if (!inVendor) return null;
+      }
+      return chart;
     }
     return null;
   }
@@ -142,7 +150,7 @@ export class AuditsService {
     if (!chart) throw new NotFoundException(`Chart ${chartId} was not found in your assigned projects`);
     const production = await this.prisma.productionEntry.findFirst({
       where: { chartId, isCurrent: true },
-      include: { coder: { select: PERSON_SELECT } },
+      include: { coder: { select: PERSON_SELECT }, reworkOf: { select: { id: true, status: true, reason: true, resolutionNote: true } } },
     });
     if (!production) throw new NotFoundException(`Chart ${chartId} has no production entry yet`);
     const audits = await this.prisma.auditEntry.findMany({
@@ -169,6 +177,9 @@ export class AuditsService {
       audits: audits.map(toAuditDto),
       canAudit: caller.role === 'AUDITOR' && check.ok,
       reason: check.ok ? null : check.message,
+      rework: production.reworkOf
+        ? { id: production.reworkOf.id, status: production.reworkOf.status, reason: production.reworkOf.reason, resolutionNote: production.reworkOf.resolutionNote }
+        : null,
       openAuditId: openMine?.id ?? null,
       reauditTargetId: latest?.status === 'REJECTED' && production.status === 'COMPLETED' ? latest.id : null,
     };
@@ -182,7 +193,7 @@ export class AuditsService {
       isCurrent: true,
       status: 'COMPLETED',
       chart: {
-        project: { auditorAssignments: { some: { auditorId: caller.id } } },
+        project: auditorProjectWhere(caller),
         ...(q.projectId ? { projectId: q.projectId } : {}),
       },
       ...(q.state === 'pending' ? pending : q.state === 'in_progress' ? mine : { OR: [pending, mine] }),
@@ -197,6 +208,7 @@ export class AuditsService {
       coder: { select: PERSON_SELECT },
       chart: { select: { project: { select: PROJECT_SELECT } } },
       auditEntries: { where: { auditorId: caller.id, status: { in: OPEN } }, select: { id: true }, take: 1 },
+      reworkOf: { select: { id: true, status: true, reason: true } },
     } as const;
   }
 
@@ -215,6 +227,7 @@ export class AuditsService {
       queueState: mine ? ('IN_PROGRESS' as const) : ('PENDING_AUDIT' as const),
       myAuditId: mine?.id ?? null,
       isReaudit: p.version > 1,
+      rework: p.reworkOf ? { id: p.reworkOf.id, status: p.reworkOf.status, reason: p.reworkOf.reason } : null,
     };
   }
 
@@ -279,6 +292,7 @@ export class AuditsService {
     if (caller.role !== 'AUDITOR') throw new ForbiddenException('Only an Auditor creates audits');
     const auditDate = toDate(dto.auditDate, 'Audit date');
     const totalErrors = this.assertTotal(dto.auditErrors, dto.errorExceptions, dto.totalErrors);
+    const reason = dto.status === 'REJECTED' ? reworkReasonOrThrow(dto.remarks) : null;
     const chartId = dto.chartId.trim();
     const check = await this.checkAuditable(caller, chartId);
     if (!check.ok) {
@@ -309,9 +323,25 @@ export class AuditsService {
         after: { chartId, version: check.production.version, status: dto.status, auditErrors: dto.auditErrors, errorExceptions: dto.errorExceptions, totalErrors },
       });
       await this.logStatus(tx, caller, created.id, dto.status, chartId);
+      await this.afterAuditRecorded(tx, caller, created, reason);
       return created;
     });
     return toAuditDto(audit);
+  }
+
+  /**
+   * Rework bookkeeping for every newly recorded audit: the first audit on
+   * a corrected version marks its rework REAUDITED, and a REJECTED
+   * ("Rework") decision opens a new rework and notifies Coder + Team Lead.
+   */
+  private async afterAuditRecorded(
+    tx: Prisma.TransactionClient,
+    caller: AuthUser,
+    audit: { id: string; chartId: string; productionEntryId: string; auditorId: string; status: string },
+    reason: string | null,
+  ) {
+    await markReaudited(tx, caller, audit.productionEntryId, audit.id);
+    if (audit.status === 'REJECTED' && reason) await openRework(tx, caller, audit, reason);
   }
 
   private listWhere(caller: AuthUser, q: Partial<ListAuditsDto>): Prisma.AuditEntryWhereInput {
@@ -323,6 +353,7 @@ export class AuditsService {
     const range = dateRange(q.from, q.to);
     if (range) and.push({ auditDate: range });
     if (q.projectId) and.push({ productionEntry: { chart: { projectId: q.projectId } } });
+    if (q.vendorId) and.push(vendorAuditWhere(q.vendorId));
     return { AND: and };
   }
 
@@ -381,6 +412,34 @@ export class AuditsService {
     const errorExceptions = dto.errorExceptions ?? audit.errorExceptions;
     const totalErrors = this.assertTotal(auditErrors, errorExceptions, dto.totalErrors);
     const auditDate = dto.auditDate !== undefined ? toDate(dto.auditDate, 'Audit date') : undefined;
+    const rejecting = dto.status === 'REJECTED' && audit.status !== 'REJECTED';
+    const reason = rejecting ? reworkReasonOrThrow(dto.remarks !== undefined ? dto.remarks : audit.remarks) : null;
+
+    if (rejecting) {
+      // The rejection and the rework it opens commit together.
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const row = await tx.auditEntry.update({
+          where: { id },
+          data: {
+            auditErrors,
+            errorExceptions,
+            totalErrors,
+            status: 'REJECTED',
+            ...(auditDate ? { auditDate } : {}),
+            ...(dto.remarks !== undefined ? { remarks: dto.remarks.trim() || null } : {}),
+          },
+          include: AUDIT_INCLUDE,
+        });
+        await writeAuditLog(tx, caller, 'AUDIT_UPDATED', 'AuditEntry', id, {
+          before: { status: audit.status, auditErrors: audit.auditErrors, errorExceptions: audit.errorExceptions, totalErrors: audit.totalErrors },
+          after: { status: 'REJECTED', auditErrors, errorExceptions, totalErrors },
+        });
+        await this.logStatus(tx, caller, id, 'REJECTED', audit.chartId);
+        await openRework(tx, caller, row, reason!);
+        return row;
+      });
+      return toAuditDto(updated);
+    }
 
     const updated = await this.prisma.auditEntry.update({
       where: { id },
@@ -410,6 +469,24 @@ export class AuditsService {
     const audit = await this.prisma.auditEntry.findUnique({ where: { id } });
     if (!audit || !(await this.chartForCaller(caller, audit.chartId))) throw new NotFoundException('Audit not found');
     if (audit.status !== 'REVIEW_REQUIRED') throw new ConflictException('Only a REVIEW_REQUIRED audit can be resolved');
+    if (dto.status === 'REJECTED') {
+      // Rejecting on review sends the chart to rework - the reason is the review remarks (or the auditor's).
+      const reason = reworkReasonOrThrow(dto.remarks !== undefined && dto.remarks.trim() ? dto.remarks : audit.remarks);
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const row = await tx.auditEntry.update({
+          where: { id },
+          data: { status: 'REJECTED', ...(dto.remarks !== undefined ? { remarks: dto.remarks.trim() || null } : {}) },
+          include: AUDIT_INCLUDE,
+        });
+        await writeAuditLog(tx, caller, 'AUDIT_RESOLVED', 'AuditEntry', id, {
+          before: { status: 'REVIEW_REQUIRED' },
+          after: { status: 'REJECTED', chartId: audit.chartId },
+        });
+        await openRework(tx, caller, row, reason);
+        return row;
+      });
+      return toAuditDto(updated);
+    }
     const updated = await this.prisma.auditEntry.update({
       where: { id },
       data: { status: dto.status, ...(dto.remarks !== undefined ? { remarks: dto.remarks.trim() || null } : {}) },
@@ -441,6 +518,7 @@ export class AuditsService {
     if (production.status !== 'COMPLETED') throw new ConflictException(`Production is ${production.status}; only COMPLETED production can be audited`);
     const auditDate = toDate(dto.auditDate, 'Audit date');
     const totalErrors = this.assertTotal(dto.auditErrors, dto.errorExceptions, dto.totalErrors);
+    const reason = dto.status === 'REJECTED' ? reworkReasonOrThrow(dto.remarks) : null;
 
     const created = await this.prisma.$transaction(async (tx) => {
       await this.lockProduction(tx, production.id);
@@ -465,6 +543,9 @@ export class AuditsService {
         after: { chartId: target.chartId, version: production.version, status: dto.status, totalErrors },
       });
       await this.logStatus(tx, caller, row.id, dto.status, target.chartId, true);
+      // Rejected again -> a fresh rework replaces the old one; otherwise the rejection is overturned.
+      if (dto.status === 'REJECTED') await openRework(tx, caller, row, reason!);
+      else await withdrawForOverturnedAudit(tx, caller, target.id);
       return row;
     });
     return toAuditDto(created);
@@ -494,6 +575,7 @@ export class AuditsService {
       for (const err of validateSync(dto, { whitelist: true, forbidNonWhitelisted: true })) {
         errors.push(...Object.values(err.constraints ?? {}).map((m) => `${err.property}: ${m}`));
       }
+      if (dto.status === 'REJECTED' && !hasReworkReason(dto.remarks)) errors.push('remarks: a rework reason is required when status is REJECTED');
       if (rec.auditDate && isValidIsoDate(rec.auditDate) && !isNotFutureDate(rec.auditDate)) errors.push('auditDate: cannot be in the future');
       else if (rec.auditDate && /^\d{4}-\d{2}-\d{2}$/.test(rec.auditDate) && !isValidIsoDate(rec.auditDate)) errors.push('auditDate: not a real calendar date');
 
@@ -562,6 +644,7 @@ export class AuditsService {
               after: { chartId: dto!.chartId, status: dto!.status, totalErrors, source: 'csv-import' },
             });
             await this.logStatus(tx, caller, created.id, dto!.status, dto!.chartId);
+            await this.afterAuditRecorded(tx, caller, created, dto!.status === 'REJECTED' ? dto!.remarks!.trim() : null);
           }
           await writeAuditLog(tx, caller, 'AUDIT_IMPORT_COMPLETED', 'AuditEntry', null, {
             after: { fileName, imported: valid.length, skipped: rows.length - valid.length },

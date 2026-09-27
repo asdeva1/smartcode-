@@ -11,7 +11,7 @@ export default function Page() {
         description="Coder productivity from your team's current production (charts, pages, DOS, ICDs, errors)."
         breadcrumb={<Breadcrumb items={[{ label: 'Team Lead', href: '/team-lead' }, { label: 'Productivity' }]} />}
       />
-      <ReportsView reports={['coder-productivity', 'production-summary']} />
+      <ReportsView reports={['coder-productivity', 'production-summary']} role="TEAM_LEAD" />
     </>
   );
 }

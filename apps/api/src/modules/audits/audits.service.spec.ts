@@ -40,7 +40,23 @@ describe('AuditsService', () => {
         count: jest.fn().mockResolvedValue(0),
         findFirst: jest.fn().mockResolvedValue({ id: 'au-1' }),
         create: jest.fn(async ({ data }) => auditRow({ ...data, id: 'au-new' })),
+        update: jest.fn(async ({ data }) => auditRow(data)),
       },
+      // Rework bookkeeping that runs inside the audit transaction (see rework.workflow.ts).
+      productionEntry: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'p-1', version: 1, coderId: 'coder-1', coder: { teamId: 'team-1' },
+          chart: { projectId: PROJECT, project: { teamId: 'team-1', team: { teamLeadId: 'tl-1' } } },
+        }),
+      },
+      rework: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn(async ({ data }) => ({ id: 'rw-new', ...data })),
+        update: jest.fn(async ({ where, data }) => ({ id: where.id, ...data })),
+      },
+      notification: { createMany: jest.fn().mockResolvedValue({ count: 0 }), updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
     prisma = {
@@ -163,10 +179,13 @@ describe('AuditsService', () => {
     beforeEach(() => prisma.auditEntry.findUnique.mockResolvedValue(auditRow({ status: 'REVIEW_REQUIRED' })));
 
     it('lets the chart\'s Team Lead or a Manager resolve to COMPLETED or REJECTED', async () => {
+      // Rejecting on review sends the chart to rework, so it commits in one transaction with the rework.
       await service.resolve(teamLead, 'au-1', { status: 'REJECTED', remarks: 'recode' });
-      expect(prisma.auditEntry.update.mock.calls[0][0].data).toEqual({ status: 'REJECTED', remarks: 'recode' });
+      expect(tx.auditEntry.update.mock.calls[0][0].data).toEqual({ status: 'REJECTED', remarks: 'recode' });
+      expect(tx.auditLog.create.mock.calls.map((c: any) => c[0].data.action)).toEqual(['AUDIT_RESOLVED', 'REWORK_CREATED']);
       await service.resolve(manager, 'au-1', { status: 'COMPLETED' });
-      expect(prisma.auditLog.create.mock.calls.map((c: any) => c[0].data.action)).toEqual(['AUDIT_RESOLVED', 'AUDIT_RESOLVED']);
+      expect(prisma.auditEntry.update.mock.calls[0][0].data).toEqual({ status: 'COMPLETED' });
+      expect(prisma.auditLog.create.mock.calls.map((c: any) => c[0].data.action)).toEqual(['AUDIT_RESOLVED']);
     });
 
     it('hides other teams\' audits and refuses Auditors/Coders', async () => {
@@ -313,6 +332,91 @@ describe('AuditsService', () => {
     it('is Auditor-only (no production import path exists)', async () => {
       await expect(service.importPreview(coder, csv(HEADER))).rejects.toThrow(ForbiddenException);
       await expect(service.importPreview(teamLead, csv(HEADER))).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('rework decisions ("Rework" = REJECTED)', () => {
+    const csv = (text: string) => ({ originalname: 'audits.csv', mimetype: 'text/csv', size: text.length, buffer: Buffer.from(text) });
+
+    it('requires a rework reason in Remarks and writes nothing without one', async () => {
+      await expect(service.create(auditor, { ...createDto, status: 'REJECTED' })).rejects.toThrow(/rework reason is required/);
+      await expect(service.create(auditor, { ...createDto, status: 'REJECTED', remarks: '  x ' })).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('opens the rework in the same transaction as the audit and notifies Coder + Team Lead', async () => {
+      await service.create(auditor, { ...createDto, status: 'REJECTED', remarks: 'ICD missing for DOS 2' });
+      expect(tx.rework.create.mock.calls[0][0].data).toMatchObject({
+        chartId: 'CH-1', auditEntryId: 'au-new', originalProductionId: 'p-1', coderId: 'coder-1', auditorId: auditor.id,
+        teamId: 'team-1', teamLeadId: 'tl-1', projectId: PROJECT, reason: 'ICD missing for DOS 2', status: 'OPEN',
+      });
+      expect(tx.notification.createMany.mock.calls[0][0].data.map((n: any) => n.userId)).toEqual(['coder-1', 'tl-1']);
+      expect(tx.auditLog.create.mock.calls.map((c: any) => c[0].data.action)).toEqual(['AUDIT_CREATED', 'AUDIT_REJECTED', 'REWORK_CREATED']);
+      noProductionWrites();
+    });
+
+    it('a normal audit opens nothing; the first audit on a corrected version marks its rework REAUDITED', async () => {
+      await service.create(auditor, createDto);
+      expect(tx.rework.create).not.toHaveBeenCalled();
+      tx.rework.findFirst.mockResolvedValueOnce({ id: 'rw-1', status: 'RESOLVED' });
+      await service.create(auditor, createDto);
+      expect(tx.rework.findFirst).toHaveBeenLastCalledWith({ where: { reworkProductionId: 'p-1', status: 'RESOLVED' } });
+      expect(tx.rework.update.mock.calls[0][0]).toMatchObject({ where: { id: 'rw-1' }, data: { status: 'REAUDITED', reauditEntryId: 'au-new' } });
+    });
+
+    it('editing an open audit to REJECTED is transactional with its rework (reason from the edit or the existing remarks)', async () => {
+      await expect(service.update(auditor, 'au-1', { status: 'REJECTED' })).rejects.toThrow(/rework reason is required/);
+      prisma.auditEntry.findUnique.mockResolvedValueOnce(auditRow({ remarks: 'DOS count wrong' }));
+      await service.update(auditor, 'au-1', { status: 'REJECTED' });
+      expect(prisma.auditEntry.update).not.toHaveBeenCalled();
+      expect(tx.auditEntry.update.mock.calls[0][0].data).toMatchObject({ status: 'REJECTED' });
+      expect(tx.rework.create.mock.calls[0][0].data.reason).toBe('DOS count wrong');
+    });
+
+    it('re-audit: rejecting again replaces the rework; accepting withdraws it', async () => {
+      prisma.auditEntry.findUnique.mockResolvedValue(auditRow({ status: 'REJECTED' }));
+      const base = { auditErrors: 1, errorExceptions: 0, auditDate: '2026-01-15' };
+      await expect(service.reaudit(auditor, 'au-1', { ...base, status: 'REJECTED' })).rejects.toThrow(/rework reason is required/);
+      await service.reaudit(auditor, 'au-1', { ...base, status: 'REJECTED', remarks: 'Still missing' });
+      expect(tx.rework.create.mock.calls[0][0].data).toMatchObject({ auditEntryId: 'au-new', reason: 'Still missing' });
+      tx.rework.findUnique.mockResolvedValueOnce({ id: 'rw-old', status: 'OPEN', chartId: 'CH-1', coderId: 'coder-1', teamLeadId: 'tl-1' });
+      await service.reaudit(auditor, 'au-1', { ...base, status: 'COMPLETED' });
+      expect(tx.rework.findUnique).toHaveBeenLastCalledWith({ where: { auditEntryId: 'au-1' } });
+      expect(tx.rework.update).toHaveBeenLastCalledWith({ where: { id: 'rw-old' }, data: { status: 'WITHDRAWN' } });
+    });
+
+    it('a Team Lead rejecting a review opens a rework too, using the review remarks as the reason', async () => {
+      prisma.auditEntry.findUnique.mockResolvedValue(auditRow({ status: 'REVIEW_REQUIRED', remarks: null }));
+      await expect(service.resolve(teamLead, 'au-1', { status: 'REJECTED' })).rejects.toThrow(/rework reason is required/);
+      await service.resolve(teamLead, 'au-1', { status: 'REJECTED', remarks: 'Coder must recode' });
+      expect(tx.rework.create.mock.calls[0][0].data.reason).toBe('Coder must recode');
+    });
+
+    it('CSV import: a REJECTED row needs a reason; valid REJECTED rows open reworks', async () => {
+      const HEADER = 'chartId,auditErrors,errorExceptions,status,auditDate,remarks';
+      const preview = await service.importPreview(auditor, csv([HEADER, 'CH-1,1,0,REJECTED,2026-01-10,'].join('\n')));
+      expect(preview.rows[0]).toMatchObject({ status: 'invalid' });
+      expect(preview.rows[0].errors.join(' ')).toMatch(/rework reason is required/);
+      await service.importCommit(auditor, csv([HEADER, 'CH-1,1,0,REJECTED,2026-01-10,Wrong DOS'].join('\n')));
+      expect(tx.rework.create.mock.calls[0][0].data.reason).toBe('Wrong DOS');
+    });
+  });
+
+  describe('vendor scope', () => {
+    it('a vendor Auditor cannot reach a chart outside their vendor even with an old project assignment (404)', async () => {
+      prisma.project = { count: jest.fn().mockResolvedValue(0) };
+      await expect(service.lookup({ ...auditor, vendorId: 'vendor-a' }, 'CH-1')).rejects.toThrow(NotFoundException);
+      expect(prisma.project.count.mock.calls[0][0].where).toEqual({ id: PROJECT, team: { teamLead: { vendorAssignments: { some: { vendorId: 'vendor-a', isActive: true } } } } });
+      prisma.project.count.mockResolvedValueOnce(1);
+      await expect(service.lookup({ ...auditor, vendorId: 'vendor-a' }, 'CH-1')).resolves.toBeDefined();
+    });
+
+    it('a Vendor account lists only its vendor\'s audits; a Manager vendor filter only narrows', async () => {
+      const inV = { some: { vendorId: 'vendor-a', isActive: true } };
+      await service.list({ ...manager, role: 'VENDOR', vendorId: 'vendor-a' }, { page: 1, pageSize: 25 } as any);
+      expect(prisma.auditEntry.findMany.mock.calls[0][0].where.AND[0]).toEqual({ productionEntry: { chart: { project: { team: { teamLead: { vendorAssignments: inV } } } } } });
+      await service.list(manager, { page: 1, pageSize: 25, vendorId: 'vendor-a' } as any);
+      expect(prisma.auditEntry.findMany.mock.calls[1][0].where.AND).toEqual([{}, { productionEntry: { chart: { project: { team: { teamLead: { vendorAssignments: inV } } } } } }]);
     });
   });
 });

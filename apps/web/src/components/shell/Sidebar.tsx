@@ -36,7 +36,7 @@ export function Sidebar({ role }: { role: Role }) {
     >
       <Box sx={{ px: 2, py: 2.5, display: 'flex', alignItems: 'center', gap: 1 }}>
         {/* Brand logo asset lives at public/smartclues-logo.png - see brief Section 12 */}
-        <img src="/smartclues-logo.png" alt="SmartClues Technologies" height={24} />
+        <img src="/smartclues-logo.png" alt="SmartClues Technologies" height={32} />
       </Box>
       <List sx={{ px: 1, flex: 1 }}>
         {items.map((item) => {

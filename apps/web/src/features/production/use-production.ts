@@ -10,6 +10,7 @@ export interface ProductionListParams {
   status?: string;
   from?: string;
   to?: string;
+  vendorId?: string;
 }
 
 export interface ProjectOption {

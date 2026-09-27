@@ -42,9 +42,17 @@ export function routeApi(mock: jest.Mock, routes: Record<string, unknown | Handl
 
 export const page = <T,>(rows: T[], total = rows.length, p = 1) => ({ data: rows, total, page: p, pageSize: 25 });
 
-/** Picks an option from an MUI select rendered by @smartcode/ui Select. */
-export async function chooseOption(user: ReturnType<typeof userEvent.setup>, label: string | RegExp, option: string | RegExp) {
-  await user.click(screen.getByRole('combobox', { name: label }));
+/**
+ * Picks an option from an MUI select rendered by @smartcode/ui Select.
+ * Pass `container` (e.g. a dialog) when the same label exists elsewhere.
+ */
+export async function chooseOption(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string | RegExp,
+  option: string | RegExp,
+  container: HTMLElement = document.body,
+) {
+  await user.click(within(container).getByRole('combobox', { name: label }));
   await user.click(within(await screen.findByRole('listbox')).getByRole('option', { name: option }));
 }
 

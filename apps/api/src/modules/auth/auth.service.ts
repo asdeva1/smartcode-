@@ -1,6 +1,10 @@
-import { Injectable, Inject, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Inject, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
+import * as argon2 from 'argon2';
 import type { AuthUser, TokenPair } from '@smartcode/types';
+import { writeAuditLog } from '../../common/audit-log';
+import { LocalAuthProvider } from './providers/local-auth.provider';
+import type { ChangePasswordDto } from './dto/change-password.dto';
 import { AUTH_PROVIDER, type AuthProvider } from './providers/auth-provider.interface';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -29,6 +33,44 @@ export class AuthService {
   async logout(userId: string, refreshToken: string): Promise<void> {
     await this.authProvider.revokeRefreshToken(refreshToken);
     await this.logAuditEvent(userId, 'LOGOUT', {});
+  }
+
+  /**
+   * Manager changes their OWN password (no other role, and never another
+   * user's password - there is no target id at all). Verifies the current
+   * password, hashes the new one with the existing argon2 mechanism, and
+   * stamps passwordChangedAt so every access/refresh token issued before
+   * this moment is rejected. Returns a fresh token pair for the caller's
+   * current device. Failures are audit-logged without any secret.
+   */
+  async changePassword(caller: AuthUser, dto: ChangePasswordDto): Promise<TokenPair> {
+    if (caller.role !== 'MANAGER') {
+      throw new ForbiddenException('Only a Manager can change their password here');
+    }
+    const user = await this.prisma.user.findUnique({ where: { id: caller.id } });
+    if (!user || !user.isActive) throw new NotFoundException('Account not found');
+
+    const currentOk = await argon2.verify(user.passwordHash, dto.currentPassword);
+    if (!currentOk) {
+      await writeAuditLog(this.prisma, caller, 'PASSWORD_CHANGE_FAILED', 'User', caller.id, { after: { reason: 'current password incorrect' } });
+      // 400, not 401: the session itself is still valid.
+      throw new BadRequestException('Current password is incorrect');
+    }
+    if (dto.newPassword !== dto.confirmNewPassword) throw new BadRequestException('Passwords do not match');
+    if (await argon2.verify(user.passwordHash, dto.newPassword)) {
+      throw new BadRequestException('The new password must be different from the current password');
+    }
+
+    const passwordHash = await LocalAuthProvider.hashPassword(dto.newPassword);
+    const changedAt = new Date();
+    await this.prisma.user.update({
+      where: { id: caller.id },
+      data: { passwordHash, passwordChangedAt: changedAt, failedLoginCount: 0, lockedUntil: null },
+    });
+    await writeAuditLog(this.prisma, caller, 'PASSWORD_CHANGED', 'User', caller.id, {
+      after: { sessionsInvalidatedBefore: changedAt.toISOString() },
+    });
+    return this.authProvider.issueTokens(caller);
   }
 
   /**

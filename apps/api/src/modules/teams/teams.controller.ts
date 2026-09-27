@@ -1,4 +1,5 @@
-import { Controller, Post, Get, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, UseGuards, BadRequestException } from '@nestjs/common';
+import { isUUID } from 'class-validator';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import type { AuthUser } from '@smartcode/types';
 import { TeamsService } from './teams.service';
@@ -23,8 +24,9 @@ export class TeamsController {
 
   @Get()
   @Roles('MANAGER', 'TEAM_LEAD')
-  @ApiOperation({ summary: 'List teams' })
-  findAll() {
-    return this.teamsService.findAll();
+  @ApiOperation({ summary: 'List teams (Manager may filter by vendorId)' })
+  findAll(@CurrentUser() caller: AuthUser, @Query('vendorId') vendorId?: string) {
+    if (vendorId && !isUUID(vendorId)) throw new BadRequestException('vendorId must be a UUID');
+    return this.teamsService.findAll(caller.role === 'MANAGER' ? vendorId || undefined : undefined);
   }
 }

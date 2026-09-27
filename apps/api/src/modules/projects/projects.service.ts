@@ -4,6 +4,14 @@ import type { AuthUser } from '@smartcode/types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { writeAuditLog } from '../../common/audit-log';
 import { PERSON_SELECT, isUniqueViolation, personRef } from '../../common/scope';
+import {
+  assertAuditorFitsProject,
+  assertProjectAuditorsFit,
+  auditorProjectWhere,
+  requireVendor,
+  teamVendorId,
+  vendorProjectWhere,
+} from '../../common/vendor-scope';
 import { CreateAuditorAssignmentDto, CreateClientDto, CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
 
 const PROJECT_INCLUDE = {
@@ -90,7 +98,13 @@ export class ProjectsService {
     this.assertManager(caller);
     const before = await this.prisma.project.findUnique({ where: { id } });
     if (!before) throw new NotFoundException('Project not found');
-    if (dto.teamId !== undefined) await this.assertTeam(dto.teamId);
+    if (dto.teamId !== undefined) {
+      await this.assertTeam(dto.teamId);
+      if (dto.teamId !== before.teamId) {
+        // Moving the project to another team moves it to that team's vendor.
+        await assertProjectAuditorsFit(this.prisma, [id], await teamVendorId(this.prisma, dto.teamId), 'Cannot change the team');
+      }
+    }
     const project = await this.prisma.project.update({
       where: { id },
       data: {
@@ -127,6 +141,7 @@ export class ProjectsService {
     ]);
     if (!auditor || auditor.role !== 'AUDITOR') throw new BadRequestException('auditorId must reference an Auditor');
     if (!project) throw new NotFoundException('Project not found');
+    await assertAuditorFitsProject(this.prisma, dto.auditorId, dto.projectId);
     try {
       const row = await this.prisma.auditorProjectAssignment.create({
         data: { auditorId: dto.auditorId, projectId: dto.projectId },
@@ -152,14 +167,16 @@ export class ProjectsService {
     return { id };
   }
 
-  /** Projects the caller works in: team projects (Coder/TL), assigned projects (Auditor), all (Manager). */
+  /** Projects the caller works in: team projects (Coder/TL), assigned projects (Auditor), own vendor's (Vendor), all (Manager). */
   async mine(caller: AuthUser) {
     const where: Prisma.ProjectWhereInput =
       caller.role === 'MANAGER'
         ? {}
         : caller.role === 'AUDITOR'
-          ? { auditorAssignments: { some: { auditorId: caller.id } } }
-          : { teamId: caller.teamId ?? '__none__' };
+          ? auditorProjectWhere(caller)
+          : caller.role === 'VENDOR'
+            ? vendorProjectWhere(requireVendor(caller))
+            : { teamId: caller.teamId ?? '__none__' };
     const rows = await this.prisma.project.findMany({
       where: { ...where, isActive: true },
       include: { client: { select: { id: true, name: true } } },

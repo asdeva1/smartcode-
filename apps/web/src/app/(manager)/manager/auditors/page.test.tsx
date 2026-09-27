@@ -89,6 +89,7 @@ describe('AuditorsPage', () => {
       'Full Name',
       'Login Name',
       'Email',
+      'Vendor',
       'Status',
       'Created Date',
       'Actions',

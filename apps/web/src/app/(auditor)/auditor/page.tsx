@@ -8,6 +8,7 @@ import { ChartIdSchema } from '@smartcode/types';
 import { Button, Input, PageHeader } from '@smartcode/ui';
 import { DashboardMetrics } from '@/components/data/DashboardMetrics';
 import { WelcomeAndQuickActions } from '@/components/data/QuickActions';
+import { ReworkPanel } from '@/features/rework/ReworkPanel';
 
 export default function AuditorDashboardPage() {
   const router = useRouter();
@@ -29,6 +30,7 @@ export default function AuditorDashboardPage() {
           { label: 'Audit Queue', href: '/auditor/queue' },
           { label: 'Audit Entry', href: '/auditor/audit-entry' },
           { label: 'My Audits', href: '/auditor/audits' },
+          { label: 'Rework', href: '/auditor/rework' },
           { label: 'Reports', href: '/auditor/reports' },
         ]}
       />
@@ -50,6 +52,7 @@ export default function AuditorDashboardPage() {
         </form>
       </Paper>
       <DashboardMetrics />
+      <ReworkPanel role="AUDITOR" />
     </>
   );
 }

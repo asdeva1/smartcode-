@@ -1,5 +1,6 @@
 import { resolveTeamId } from './resolve-team-id';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { SESSION_USER_INCLUDE } from './session-user';
 
 describe('resolveTeamId', () => {
   it('uses the team a Team Lead leads (Team.teamLeadId), since their own User.teamId is not set', () => {
@@ -29,7 +30,9 @@ describe('JwtStrategy.validate', () => {
     } as any;
     const user = await new JwtStrategy(config, prisma).validate({ sub: 'tl', role: 'TEAM_LEAD' });
     expect(user).toMatchObject({ id: 'tl', teamId: 'team-9', fullName: 'Tina Lead' });
-    expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { id: 'tl' }, include: { leadsTeam: { select: { id: true } } } });
+    // One query resolves team AND vendor scope for the session.
+    expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { id: 'tl' }, include: SESSION_USER_INCLUDE });
+    expect(SESSION_USER_INCLUDE.leadsTeam).toEqual({ select: { id: true } });
   });
 
   it('still rejects inactive users', async () => {

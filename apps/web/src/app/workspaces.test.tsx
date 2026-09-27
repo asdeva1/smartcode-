@@ -63,11 +63,14 @@ beforeEach(() => {
 });
 
 describe('RBAC visibility (mirrors backend rules; the backend enforces them independently)', () => {
-  it('navigation: only Coders get production entry; only Auditors get audit entry; Coders have no audit pages', () => {
+  it('navigation: only Coders get production pages to work in; only Auditors get the audit queue; Coders have no audit pages', () => {
+    // Phase 10 navigation: "Add Production" / "Audit Entry" are reached from the Production page,
+    // dashboard quick actions and the audit queue rather than a sidebar entry of their own.
     const hrefs = (role: Role) => NAVIGATION[role].map((i) => i.href);
-    expect(hrefs('CODER')).toContain('/coder/production/new');
-    for (const role of ['MANAGER', 'TEAM_LEAD', 'AUDITOR'] as Role[]) expect(hrefs(role).some((h) => h.includes('production/new'))).toBe(false);
-    expect(hrefs('AUDITOR')).toContain('/auditor/audit-entry');
+    expect(hrefs('CODER')).toContain('/coder/production');
+    for (const role of ['MANAGER', 'TEAM_LEAD', 'AUDITOR', 'VENDOR'] as Role[]) expect(hrefs(role).some((h) => h.includes('production/new'))).toBe(false);
+    expect(hrefs('AUDITOR')).toContain('/auditor/queue');
+    for (const role of ['MANAGER', 'TEAM_LEAD', 'CODER', 'VENDOR'] as Role[]) expect(hrefs(role).some((h) => h.includes('audit-entry') || h.includes('/queue'))).toBe(false);
     expect(hrefs('CODER').some((h) => /audit/.test(h))).toBe(false);
     for (const role of Object.keys(NAVIGATION) as Role[]) expect(hrefs(role).every((h) => h === `/${role === 'TEAM_LEAD' ? 'team-lead' : role.toLowerCase()}` || h.startsWith(`/${role === 'TEAM_LEAD' ? 'team-lead' : role.toLowerCase()}/`))).toBe(true);
   });
@@ -166,7 +169,10 @@ describe('Team Lead workspace', () => {
   });
 
   it('dashboard shows real metrics and an error state with retry', async () => {
-    routeApi(fetchMock, { 'GET /reports/dashboard': { role: 'TEAM_LEAD', metrics: [{ key: 'activeCoders', label: 'Active Coders', value: 4 }] } });
+    routeApi(fetchMock, {
+      'GET /reports/dashboard': { role: 'TEAM_LEAD', metrics: [{ key: 'activeCoders', label: 'Active Coders', value: 4 }] },
+      'GET /rework/summary': { open: 0, inProgress: 0, resolved: 0, reaudited: 0, unread: 0, recent: [] },
+    });
     fetchMock.mockRejectedValueOnce(new Error('down'));
     const user = userEvent.setup();
     renderWithProviders(<TeamLeadDashboard />);

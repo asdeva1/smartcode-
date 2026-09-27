@@ -81,6 +81,9 @@ export function AuditQueue() {
                   <>
                     <Chip size="small" variant="outlined" color={r.queueState === 'IN_PROGRESS' ? 'info' : 'default'} label={r.queueState === 'IN_PROGRESS' ? 'In progress' : 'Pending'} />
                     {r.isReaudit && <Chip size="small" color="warning" variant="outlined" label="Re-audit" sx={{ ml: 0.5 }} />}
+                    {r.rework?.status === 'RESOLVED' && (
+                      <Chip size="small" color="info" label="Rework resolved" title={`Rework reason: ${r.rework.reason}`} sx={{ ml: 0.5 }} />
+                    )}
                   </>
                 ),
               },

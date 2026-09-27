@@ -32,4 +32,9 @@ export class ListTeamLeadsDto {
   @IsOptional()
   @IsUUID()
   teamId?: string;
+
+  @ApiProperty({ required: false, description: 'Only people actively assigned to this vendor' })
+  @IsOptional()
+  @IsUUID()
+  vendorId?: string;
 }

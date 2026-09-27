@@ -49,3 +49,18 @@ export function asInputRef<T extends { ref: unknown }>(registration: T): Omit<T,
   const { ref, ...rest } = registration;
   return { ...rest, inputRef: ref };
 }
+
+/** Date + time in the user's locale (rework requested / resolved moments). */
+export function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '—';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+export const REWORK_STATUS_FILTER_OPTIONS = [
+  { value: 'pending', label: 'Pending (open + in progress)' },
+  { value: 'RESOLVED', label: 'Resolved - awaiting re-audit' },
+  { value: 'REAUDITED', label: 'Re-audited' },
+  { value: 'WITHDRAWN', label: 'Withdrawn' },
+  { value: '', label: 'All' },
+];

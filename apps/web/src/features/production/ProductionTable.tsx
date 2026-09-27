@@ -18,6 +18,7 @@ import {
   useToast,
 } from '@smartcode/ui';
 import { ExportMenu } from '@/components/data/ExportMenu';
+import { VendorFilter } from '@/components/data/VendorFilter';
 import { PRODUCTION_STATUS_OPTIONS, errorMessage, formatDate, personName } from '@/lib/format';
 import { useProductionAction, useProductionList } from './use-production';
 import { EditProductionDialog } from './EditProductionDialog';
@@ -58,11 +59,18 @@ export function ProductionTable({ role }: { role: Role }) {
   const [status, setStatus] = React.useState('');
   const [from, setFrom] = React.useState('');
   const [to, setTo] = React.useState('');
+  const [vendorId, setVendorId] = React.useState('');
   const [menu, setMenu] = React.useState<{ el: HTMLElement; row: ProductionEntry } | null>(null);
   const [editTarget, setEditTarget] = React.useState<ProductionEntry | null>(null);
   const [confirm, setConfirm] = React.useState<{ action: 'rework' | 'cancel'; row: ProductionEntry } | null>(null);
 
-  const filters = { search: search || undefined, status: status || undefined, from: from || undefined, to: to || undefined };
+  const filters = {
+    search: search || undefined,
+    status: status || undefined,
+    from: from || undefined,
+    to: to || undefined,
+    vendorId: role === 'MANAGER' ? vendorId || undefined : undefined,
+  };
   const { data, isLoading, isError, refetch, isFetching } = useProductionList({ page, pageSize: PAGE_SIZE, ...filters });
   const act = useProductionAction();
   const filter = (apply: () => void) => {
@@ -118,6 +126,7 @@ export function ProductionTable({ role }: { role: Role }) {
         <Select label="Status" value={status} onChange={(e) => filter(() => setStatus(e.target.value))} options={PRODUCTION_STATUS_OPTIONS} sx={{ minWidth: 160 }} />
         <DatePicker label="Coded from" value={from} onChange={(e) => filter(() => setFrom(e.target.value))} sx={{ maxWidth: 170 }} />
         <DatePicker label="Coded to" value={to} onChange={(e) => filter(() => setTo(e.target.value))} sx={{ maxWidth: 170 }} />
+        {role === 'MANAGER' && <VendorFilter value={vendorId} onChange={(v) => filter(() => setVendorId(v))} />}
         <IconButton onClick={() => refetch()} aria-label="Refresh" disabled={isFetching}>
           <RefreshCw size={18} />
         </IconButton>

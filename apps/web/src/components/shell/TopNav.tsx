@@ -3,14 +3,15 @@ import * as React from 'react';
 import AppBar from '@mui/material/AppBar';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
-import IconButton from '@mui/material/IconButton';
 import Avatar from '@mui/material/Avatar';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import Box from '@mui/material/Box';
-import { Bell, LogOut, ChevronDown } from 'lucide-react';
-import type { AuthUser } from '@smartcode/types';
+import { LogOut, ChevronDown, KeyRound } from 'lucide-react';
+import Link from 'next/link';
+import { ROLE_LABELS, type AuthUser } from '@smartcode/types';
 import { useLogout } from '@/features/auth/use-auth';
+import { NotificationBell } from '@/features/notifications/NotificationBell';
 
 export function TopNav({ user }: { user: AuthUser }) {
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
@@ -26,10 +27,7 @@ export function TopNav({ user }: { user: AuthUser }) {
       sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}
     >
       <Toolbar sx={{ justifyContent: 'flex-end', gap: 1 }}>
-        {/* Notifications placeholder - full module lands in Phase 7, see docs/10 */}
-        <IconButton size="small" aria-label="Notifications">
-          <Bell size={18} />
-        </IconButton>
+        <NotificationBell role={user.role} />
         <Box
           sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer', pl: 1 }}
           onClick={(e) => setAnchorEl(e.currentTarget)}
@@ -42,12 +40,18 @@ export function TopNav({ user }: { user: AuthUser }) {
               {user.loginName}
             </Typography>
             <Typography variant="caption" color="text.secondary" lineHeight={1.2}>
-              {user.employeeId} | {user.role.replace('_', ' ')}
+              {user.employeeId} | {ROLE_LABELS[user.role]}
             </Typography>
           </Box>
           <ChevronDown size={16} />
         </Box>
         <Menu anchorEl={anchorEl} open={!!anchorEl} onClose={() => setAnchorEl(null)}>
+          {user.role === 'MANAGER' && (
+            <MenuItem component={Link} href="/manager/settings" onClick={() => setAnchorEl(null)}>
+              <KeyRound size={16} style={{ marginRight: 8 }} />
+              Reset Password
+            </MenuItem>
+          )}
           <MenuItem
             onClick={() => {
               setAnchorEl(null);

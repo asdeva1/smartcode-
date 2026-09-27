@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 
 export class ListAuditorsDto {
   @ApiProperty({ required: false, default: 1 })
@@ -22,4 +22,9 @@ export class ListAuditorsDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiProperty({ required: false, description: 'Only people actively assigned to this vendor' })
+  @IsOptional()
+  @IsUUID()
+  vendorId?: string;
 }

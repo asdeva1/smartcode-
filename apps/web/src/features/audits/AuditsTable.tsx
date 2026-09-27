@@ -8,6 +8,7 @@ import { MoreVertical, RefreshCw } from 'lucide-react';
 import type { AuditEntry, Role } from '@smartcode/types';
 import { DataTable, DatePicker, ErrorState, FilterBar, Input, Pagination, Select, StatusBadge } from '@smartcode/ui';
 import { ExportMenu } from '@/components/data/ExportMenu';
+import { VendorFilter } from '@/components/data/VendorFilter';
 import { ChartDetailDrawer } from '@/features/charts/ChartDetailDrawer';
 import { AUDIT_STATUS_OPTIONS, formatDate, personName } from '@/lib/format';
 import { useAuditList } from './use-audits';
@@ -36,11 +37,18 @@ export function AuditsTable({ role, userId, toolbar }: { role: Role; userId?: st
   const [status, setStatus] = React.useState('');
   const [from, setFrom] = React.useState('');
   const [to, setTo] = React.useState('');
+  const [vendorId, setVendorId] = React.useState('');
   const [menu, setMenu] = React.useState<{ el: HTMLElement; row: AuditEntry } | null>(null);
   const [resolveTarget, setResolveTarget] = React.useState<AuditEntry | null>(null);
   const [chart, setChart] = React.useState<string | null>(null);
 
-  const filters = { search: search || undefined, status: status || undefined, from: from || undefined, to: to || undefined };
+  const filters = {
+    search: search || undefined,
+    status: status || undefined,
+    from: from || undefined,
+    to: to || undefined,
+    vendorId: role === 'MANAGER' ? vendorId || undefined : undefined,
+  };
   const { data, isLoading, isError, refetch, isFetching } = useAuditList({ page, pageSize: PAGE_SIZE, ...filters });
   const filter = (apply: () => void) => {
     apply();
@@ -60,6 +68,7 @@ export function AuditsTable({ role, userId, toolbar }: { role: Role; userId?: st
         <Select label="Status" value={status} onChange={(e) => filter(() => setStatus(e.target.value))} options={AUDIT_STATUS_OPTIONS} sx={{ minWidth: 170 }} />
         <DatePicker label="Audited from" value={from} onChange={(e) => filter(() => setFrom(e.target.value))} sx={{ maxWidth: 170 }} />
         <DatePicker label="Audited to" value={to} onChange={(e) => filter(() => setTo(e.target.value))} sx={{ maxWidth: 170 }} />
+        {role === 'MANAGER' && <VendorFilter value={vendorId} onChange={(v) => filter(() => setVendorId(v))} />}
         <IconButton onClick={() => refetch()} aria-label="Refresh" disabled={isFetching}>
           <RefreshCw size={18} />
         </IconButton>

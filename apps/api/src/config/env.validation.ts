@@ -15,4 +15,7 @@ export const envValidationSchema = Joi.object({
   JWT_ACCESS_EXPIRY: Joi.string().default('15m'),
   JWT_REFRESH_EXPIRY: Joi.string().default('7d'),
   WEB_ORIGIN: Joi.string().uri().default('http://localhost:3000'),
+  // IANA zone for server-side "today" when a client doesn't send its own
+  // local date (report periods). Explicit so the host timezone never matters.
+  APP_TIMEZONE: Joi.string().default('UTC'),
 });

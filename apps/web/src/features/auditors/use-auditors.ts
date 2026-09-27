@@ -12,6 +12,7 @@ export interface AuditorListParams {
   page: number;
   pageSize: number;
   search?: string;
+  vendorId?: string;
 }
 
 function buildQuery(params: AuditorListParams): string {
@@ -19,6 +20,7 @@ function buildQuery(params: AuditorListParams): string {
   q.set('page', String(params.page));
   q.set('pageSize', String(params.pageSize));
   if (params.search) q.set('search', params.search);
+  if (params.vendorId) q.set('vendorId', params.vendorId);
   return q.toString();
 }
 

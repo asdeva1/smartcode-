@@ -19,6 +19,7 @@ export interface AuditListParams {
   status?: string;
   from?: string;
   to?: string;
+  vendorId?: string;
 }
 
 export function useAuditList(params: AuditListParams) {

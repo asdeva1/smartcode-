@@ -112,6 +112,11 @@ export class ListProductionDto extends DatedPageQueryDto {
   @IsUUID()
   coderId?: string;
 
+  @ApiProperty({ required: false, description: 'Narrow to one vendor (AND-ed with the caller scope)' })
+  @IsOptional()
+  @IsUUID()
+  vendorId?: string;
+
   @ApiProperty({ required: false, default: false, description: 'Include superseded versions' })
   @IsOptional()
   @Transform(({ value }) => value === true || value === 'true')

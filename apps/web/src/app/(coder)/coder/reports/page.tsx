@@ -12,7 +12,7 @@ export default function Page() {
         description="Your production and productivity reports."
         breadcrumb={<Breadcrumb items={[{ label: 'Coder', href: '/coder' }, { label: 'Reports' }]} />}
       />
-      <ReportsView reports={REPORTS_BY_ROLE.CODER} />
+      <ReportsView reports={REPORTS_BY_ROLE.CODER} role="CODER" />
     </>
   );
 }

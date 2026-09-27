@@ -6,6 +6,7 @@ import { RefreshCw } from 'lucide-react';
 import type { ChartSummary, Role } from '@smartcode/types';
 import { Button, DataTable, ErrorState, FilterBar, Input, Pagination, Select, StatusBadge } from '@smartcode/ui';
 import { ExportMenu } from '@/components/data/ExportMenu';
+import { VendorFilter } from '@/components/data/VendorFilter';
 import { AUDIT_STATUS_OPTIONS, PRODUCTION_STATUS_OPTIONS, formatDate, personName } from '@/lib/format';
 import { AuditStateBadge } from '@/features/audits/AuditStateBadge';
 import { useCharts } from './use-charts';
@@ -24,6 +25,7 @@ export function ChartRepository({ role }: { role: Role }) {
   const [productionStatus, setProductionStatus] = React.useState('');
   const [auditState, setAuditState] = React.useState('');
   const [rework, setRework] = React.useState(false);
+  const [vendorId, setVendorId] = React.useState('');
   const [openChart, setOpenChart] = React.useState<string | null>(null);
 
   const filters = {
@@ -31,6 +33,7 @@ export function ChartRepository({ role }: { role: Role }) {
     productionStatus: productionStatus || undefined,
     auditState: role === 'CODER' ? undefined : auditState || undefined,
     rework: rework ? ('yes' as const) : undefined,
+    vendorId: role === 'MANAGER' ? vendorId || undefined : undefined,
   };
   const { data, isLoading, isError, refetch, isFetching } = useCharts({ page, pageSize: PAGE_SIZE, ...filters });
   const filter = (apply: () => void) => {
@@ -58,6 +61,7 @@ export function ChartRepository({ role }: { role: Role }) {
             sx={{ minWidth: 170 }}
           />
         )}
+        {role === 'MANAGER' && <VendorFilter value={vendorId} onChange={(v) => filter(() => setVendorId(v))} />}
         <Button variant={rework ? 'contained' : 'outlined'} size="small" onClick={() => filter(() => setRework(!rework))} aria-pressed={rework}>
           Rework only
         </Button>

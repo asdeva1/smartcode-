@@ -14,6 +14,7 @@ export interface TeamLeadListParams {
   search?: string;
   status: 'all' | 'active' | 'inactive';
   teamId?: string;
+  vendorId?: string;
 }
 
 function buildQuery(params: TeamLeadListParams): string {
@@ -23,6 +24,7 @@ function buildQuery(params: TeamLeadListParams): string {
   q.set('status', params.status);
   if (params.search) q.set('search', params.search);
   if (params.teamId) q.set('teamId', params.teamId);
+  if (params.vendorId) q.set('vendorId', params.vendorId);
   return q.toString();
 }
 

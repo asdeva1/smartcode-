@@ -41,6 +41,8 @@ export const TeamLeadSchema = z.object({
   isActive: z.boolean(),
   createdAt: z.string(),
   team: z.object({ id: z.string().uuid(), name: z.string() }).nullable(),
+  /** The vendor this Team Lead is actively assigned to, if any. */
+  vendor: z.object({ id: z.string().uuid(), name: z.string() }).nullable().optional(),
 });
 export type TeamLead = z.infer<typeof TeamLeadSchema>;
 

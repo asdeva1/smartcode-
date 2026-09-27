@@ -23,6 +23,11 @@ export class ListChartsDto extends PageQueryDto {
   @IsOptional()
   @IsIn(['yes'])
   rework?: 'yes';
+
+  @ApiProperty({ required: false, description: 'Narrow to one vendor (AND-ed with the caller scope)' })
+  @IsOptional()
+  @IsUUID()
+  vendorId?: string;
 }
 
 export class ExportChartsDto extends ListChartsDto {

@@ -12,7 +12,7 @@ export default function Page() {
         description="Team-scoped production and audit reports."
         breadcrumb={<Breadcrumb items={[{ label: 'Team Lead', href: '/team-lead' }, { label: 'Reports' }]} />}
       />
-      <ReportsView reports={REPORTS_BY_ROLE.TEAM_LEAD} />
+      <ReportsView reports={REPORTS_BY_ROLE.TEAM_LEAD} role="TEAM_LEAD" />
     </>
   );
 }

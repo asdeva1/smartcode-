@@ -20,11 +20,13 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
  * endpoint, and that it is wired, not just decorated.
  */
 const TEAM_ID = '11111111-1111-4111-8111-111111111111';
+const VENDOR_ID = '33333333-3333-4333-8333-333333333333';
 const USERS: Record<Role, any> = {
   MANAGER: { id: 'mgr', role: 'MANAGER', teamId: null, leadsTeam: null },
   TEAM_LEAD: { id: 'tl', role: 'TEAM_LEAD', teamId: null, leadsTeam: { id: TEAM_ID } },
   CODER: { id: 'coder', role: 'CODER', teamId: TEAM_ID, leadsTeam: null },
   AUDITOR: { id: 'aud', role: 'AUDITOR', teamId: null, leadsTeam: null },
+  VENDOR: { id: 'ven', role: 'VENDOR', teamId: null, leadsTeam: null, vendorId: VENDOR_ID, vendor: { id: VENDOR_ID, isActive: true } },
 };
 for (const u of Object.values(USERS)) {
   Object.assign(u, { employeeId: `E-${u.id}`, loginName: `${u.id}.login`, email: `${u.id}@x.local`, fullName: u.id, isActive: true });
@@ -76,7 +78,8 @@ const token = (app: INestApplication, role: Role) =>
 
 type Method = 'get' | 'post' | 'patch' | 'delete';
 const ID = '22222222-2222-4222-8222-222222222222';
-const ALL: Role[] = ['MANAGER', 'TEAM_LEAD', 'CODER', 'AUDITOR'];
+const ALL: Role[] = ['MANAGER', 'TEAM_LEAD', 'CODER', 'AUDITOR', 'VENDOR'];
+const STAFF: Role[] = ['MANAGER', 'TEAM_LEAD', 'CODER', 'AUDITOR'];
 
 const ROUTES: { method: Method; path: string; allowed: Role[] }[] = [
   { method: 'post', path: '/api/manager/team-leads', allowed: ['MANAGER'] },
@@ -94,21 +97,56 @@ const ROUTES: { method: Method; path: string; allowed: Role[] }[] = [
   { method: 'post', path: '/api/manager/auditor-assignments', allowed: ['MANAGER'] },
   { method: 'get', path: '/api/projects/mine', allowed: ALL },
   { method: 'post', path: '/api/production', allowed: ['CODER'] },
-  { method: 'get', path: '/api/production', allowed: ['MANAGER', 'TEAM_LEAD', 'CODER'] },
+  { method: 'get', path: '/api/production', allowed: ['MANAGER', 'TEAM_LEAD', 'CODER', 'VENDOR'] },
+  { method: 'get', path: '/api/production/export?format=csv', allowed: ['MANAGER', 'TEAM_LEAD', 'CODER', 'VENDOR'] },
+  { method: 'get', path: `/api/production/${ID}`, allowed: ['MANAGER', 'TEAM_LEAD', 'CODER', 'VENDOR'] },
   { method: 'patch', path: `/api/production/${ID}`, allowed: ['CODER'] },
   { method: 'post', path: `/api/production/${ID}/rework`, allowed: ['CODER', 'TEAM_LEAD', 'MANAGER'] },
   { method: 'post', path: `/api/production/${ID}/cancel`, allowed: ['TEAM_LEAD', 'MANAGER'] },
   { method: 'get', path: '/api/charts', allowed: ALL },
-  { method: 'get', path: '/api/charts/CH-1/audit-history', allowed: ['MANAGER', 'TEAM_LEAD', 'AUDITOR'] },
+  { method: 'get', path: '/api/charts/CH-1/audit-history', allowed: ['MANAGER', 'TEAM_LEAD', 'AUDITOR', 'VENDOR'] },
   { method: 'get', path: '/api/charts/CH-1/production', allowed: ['AUDITOR', 'TEAM_LEAD', 'MANAGER'] },
   { method: 'get', path: '/api/auditor/queue', allowed: ['AUDITOR'] },
   { method: 'post', path: '/api/audits', allowed: ['AUDITOR'] },
-  { method: 'get', path: '/api/audits', allowed: ['AUDITOR', 'TEAM_LEAD', 'MANAGER'] },
+  { method: 'get', path: '/api/audits', allowed: ['AUDITOR', 'TEAM_LEAD', 'MANAGER', 'VENDOR'] },
   { method: 'patch', path: `/api/audits/${ID}`, allowed: ['AUDITOR'] },
   { method: 'post', path: `/api/audits/${ID}/resolve`, allowed: ['TEAM_LEAD', 'MANAGER'] },
   { method: 'post', path: `/api/audits/${ID}/reaudit`, allowed: ['AUDITOR', 'MANAGER'] },
   { method: 'post', path: '/api/audits/import', allowed: ['AUDITOR'] },
-  { method: 'get', path: '/api/reports/dashboard', allowed: ALL },
+  { method: 'get', path: '/api/reports/dashboard', allowed: STAFF },
+  // Vendor management - Manager only
+  { method: 'get', path: '/api/vendors', allowed: ['MANAGER'] },
+  { method: 'post', path: '/api/vendors', allowed: ['MANAGER'] },
+  { method: 'get', path: '/api/vendors/options', allowed: ['MANAGER'] },
+  { method: 'get', path: '/api/vendors/overview', allowed: ['MANAGER'] },
+  { method: 'get', path: `/api/vendors/${ID}`, allowed: ['MANAGER'] },
+  { method: 'patch', path: `/api/vendors/${ID}`, allowed: ['MANAGER'] },
+  { method: 'patch', path: `/api/vendors/${ID}/activate`, allowed: ['MANAGER'] },
+  { method: 'patch', path: `/api/vendors/${ID}/deactivate`, allowed: ['MANAGER'] },
+  { method: 'get', path: `/api/vendors/${ID}/structure`, allowed: ['MANAGER'] },
+  { method: 'get', path: `/api/vendors/${ID}/activity`, allowed: ['MANAGER'] },
+  { method: 'get', path: `/api/vendors/${ID}/dashboard`, allowed: ['MANAGER'] },
+  { method: 'get', path: `/api/vendors/${ID}/assignable?role=TEAM_LEAD`, allowed: ['MANAGER'] },
+  { method: 'post', path: `/api/vendors/${ID}/team-leads`, allowed: ['MANAGER'] },
+  { method: 'delete', path: `/api/vendors/${ID}/team-leads/${ID}`, allowed: ['MANAGER'] },
+  { method: 'post', path: `/api/vendors/${ID}/auditors`, allowed: ['MANAGER'] },
+  { method: 'delete', path: `/api/vendors/${ID}/auditors/${ID}`, allowed: ['MANAGER'] },
+  { method: 'post', path: `/api/vendors/${ID}/accounts`, allowed: ['MANAGER'] },
+  // A Vendor's own portal - Vendor only
+  { method: 'get', path: '/api/vendor/me', allowed: ['VENDOR'] },
+  { method: 'get', path: '/api/vendor/structure', allowed: ['VENDOR'] },
+  { method: 'get', path: '/api/vendor/dashboard', allowed: ['VENDOR'] },
+  // Rework + notifications - row-scoped in the services
+  { method: 'get', path: '/api/rework', allowed: ALL },
+  { method: 'get', path: '/api/rework/summary', allowed: ALL },
+  { method: 'get', path: `/api/rework/${ID}`, allowed: ALL },
+  { method: 'post', path: `/api/rework/${ID}/read`, allowed: ALL },
+  { method: 'post', path: `/api/rework/${ID}/resolve`, allowed: ['CODER'] },
+  { method: 'get', path: '/api/notifications', allowed: ALL },
+  { method: 'post', path: '/api/notifications/read-all', allowed: ALL },
+  { method: 'post', path: `/api/notifications/${ID}/read`, allowed: ALL },
+  // Password change - the Manager's own account only
+  { method: 'post', path: '/api/auth/change-password', allowed: ['MANAGER'] },
 ];
 
 describe('HTTP route RBAC (real AppModule, guards and pipes)', () => {
@@ -192,6 +230,56 @@ describe('HTTP behaviour of the new endpoints', () => {
       .attach('file', Buffer.from('%PDF-1.4 fake'), { filename: 'coders.pdf', contentType: 'application/pdf' });
     expect(res.status).toBe(400);
     expect(JSON.stringify(res.body)).toMatch(/Only \.csv files/);
+  });
+
+  it('a Vendor account cannot address another vendor through its portal (no vendor id is accepted)', async () => {
+    const res = await request(app.getHttpServer()).get(`/api/vendor/dashboard?vendorId=${ID}`).set('Authorization', as('VENDOR'));
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toContain('property vendorId should not exist');
+  });
+
+  it('scopes a Vendor account\'s production list to its own vendor in the database query', async () => {
+    await request(app.getHttpServer()).get('/api/production').set('Authorization', as('VENDOR')).expect(200);
+    const where = prisma.productionEntry.findMany.mock.calls.at(-1)[0].where;
+    expect(where.AND[0]).toEqual({ coder: { team: { teamLead: { vendorAssignments: { some: { vendorId: VENDOR_ID, isActive: true } } } } } });
+  });
+
+  it('lets a Vendor account run its (vendor-scoped) reports; per-report role rules still apply', async () => {
+    await request(app.getHttpServer()).get('/api/reports/production-summary?period=this_month&today=2026-09-27').set('Authorization', as('VENDOR')).expect(200);
+    await request(app.getHttpServer()).get('/api/reports/assigned-charts').set('Authorization', as('VENDOR')).expect(403);
+  });
+
+  it('refuses report filters a role may not use', async () => {
+    const res = await request(app.getHttpServer()).get(`/api/reports/production-summary?vendorId=${ID}`).set('Authorization', as('TEAM_LEAD'));
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.body)).toContain('The Vendor filter is not available for your role');
+  });
+
+  it('validates the password-change body (confirmation must match) and never accepts a target user', async () => {
+    const mismatch = await request(app.getHttpServer()).post('/api/auth/change-password').set('Authorization', as('MANAGER'))
+      .send({ currentPassword: 'x', newPassword: 'NewPassword1', confirmNewPassword: 'Other' });
+    expect(mismatch.status).toBe(400);
+    expect(JSON.stringify(mismatch.body)).toContain('Passwords do not match');
+    const target = await request(app.getHttpServer()).post('/api/auth/change-password').set('Authorization', as('MANAGER'))
+      .send({ currentPassword: 'x', newPassword: 'NewPassword1', confirmNewPassword: 'NewPassword1', userId: ID });
+    expect(target.status).toBe(400);
+    expect(JSON.stringify(target.body)).toContain('property userId should not exist');
+  });
+
+  it('never accepts a client-supplied coder identity when resolving rework', async () => {
+    const res = await request(app.getHttpServer()).post(`/api/rework/${ID}/resolve`).set('Authorization', as('CODER'))
+      .send({ pageCount: 1, totalICDs: 1, totalDOS: 1, codedDate: '2026-01-01', resolutionNote: 'fixed it', coderId: 'someone' });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toContain('property coderId should not exist');
+  });
+
+  it('locks out a Vendor account whose vendor is deactivated', async () => {
+    USERS.VENDOR.vendor.isActive = false;
+    try {
+      await request(app.getHttpServer()).get('/api/production').set('Authorization', as('VENDOR')).expect(401);
+    } finally {
+      USERS.VENDOR.vendor.isActive = true;
+    }
   });
 
   it('rejects a report outside the caller\'s role', async () => {

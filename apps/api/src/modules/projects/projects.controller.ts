@@ -71,7 +71,7 @@ export class ProjectsController {
   }
 
   @Get('projects/mine')
-  @Roles('MANAGER', 'TEAM_LEAD', 'CODER', 'AUDITOR')
+  @Roles('MANAGER', 'TEAM_LEAD', 'CODER', 'AUDITOR', 'VENDOR')
   @ApiOperation({ summary: 'Active projects the caller works in' })
   mine(@CurrentUser() caller: AuthUser) {
     return this.projects.mine(caller);

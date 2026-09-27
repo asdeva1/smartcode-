@@ -29,8 +29,8 @@ type Tab = 'teams' | 'projects' | 'assignments';
  * (which team works which client project - charts belong to projects) and
  * Auditor -> Project assignments (what each Auditor may audit).
  */
-export function ManagerSetup() {
-  const [tab, setTab] = React.useState<Tab>('teams');
+export function ManagerSetup({ initialTab = 'teams' }: { initialTab?: Tab }) {
+  const [tab, setTab] = React.useState<Tab>(initialTab);
   return (
     <>
       <Tabs

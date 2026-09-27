@@ -12,26 +12,29 @@ import { DashboardQueryDto, ExportReportDto, ReportQueryDto } from './dto/report
 @ApiTags('reports')
 @ApiBearerAuth()
 @UseGuards(RolesGuard)
-@Roles('MANAGER', 'TEAM_LEAD', 'CODER', 'AUDITOR')
+@Roles('MANAGER', 'TEAM_LEAD', 'CODER', 'AUDITOR', 'VENDOR')
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly reports: ReportsService) {}
 
   @Get('dashboard')
+  // Vendors have their own scoped dashboard at GET /vendor/dashboard.
+  @Roles('MANAGER', 'TEAM_LEAD', 'CODER', 'AUDITOR')
   @ApiOperation({ summary: 'Role-specific dashboard metrics from real data' })
   dashboard(@CurrentUser() caller: AuthUser, @Query() query: DashboardQueryDto) {
     return this.reports.dashboard(caller, query.today);
   }
 
   @Get(':report')
-  @ApiOperation({ summary: 'Run a role-scoped report (see REPORTS_BY_ROLE)' })
+  @ApiOperation({ summary: 'Run a role-scoped report (see REPORTS_BY_ROLE) with period, grouping and role-authorised filters' })
   report(@CurrentUser() caller: AuthUser, @Param('report') report: string, @Query() query: ReportQueryDto) {
-    return this.reports.report(caller, report, query.from, query.to);
+    return this.reports.report(caller, report, query);
   }
 
   @Get(':report/export')
   @ApiOperation({ summary: 'Export a role-scoped report (format=csv|xlsx|pdf)' })
   export(@CurrentUser() caller: AuthUser, @Param('report') report: string, @Query() query: ExportReportDto) {
-    return this.reports.export(caller, report, parseExportFormat(query.format), query.from, query.to);
+    const { format, ...rest } = query;
+    return this.reports.export(caller, report, parseExportFormat(format), rest);
   }
 }

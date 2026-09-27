@@ -16,6 +16,8 @@ import {
   requireTeam,
   toDate,
 } from '../../common/scope';
+import { vendorProductionWhere } from '../../common/vendor-scope';
+import { linkReworkVersion, resolveRework } from '../rework/rework.workflow';
 import { CreateProductionDto, ListProductionDto, UpdateProductionDto } from './dto/production.dto';
 
 export const PRODUCTION_INCLUDE = {
@@ -149,6 +151,7 @@ export class ProductionService {
     if (range) and.push({ codedDate: range });
     if (q.projectId) and.push({ chart: { projectId: q.projectId } });
     if (q.coderId && caller.role !== 'CODER') and.push({ coderId: q.coderId });
+    if (q.vendorId) and.push(vendorProductionWhere(q.vendorId));
     return { AND: and };
   }
 
@@ -194,17 +197,38 @@ export class ProductionService {
       }
     }
     const codedDate = dto.codedDate !== undefined ? toDate(dto.codedDate, 'Coded date') : undefined;
+    const data = {
+      ...(dto.pageCount !== undefined ? { pageCount: dto.pageCount } : {}),
+      ...(dto.totalICDs !== undefined ? { totalICDs: dto.totalICDs } : {}),
+      ...(dto.totalDOS !== undefined ? { totalDOS: dto.totalDOS } : {}),
+      ...(dto.status !== undefined ? { status: dto.status } : {}),
+      ...(dto.remarks !== undefined ? { remarks: dto.remarks.trim() || null } : {}),
+      ...(codedDate ? { codedDate } : {}),
+    };
+
+    // Completing a version that corrects an Auditor's rework resolves that
+    // rework in the same transaction (Team Lead + Auditor are notified).
+    const completing = dto.status === 'COMPLETED' && entry.status !== 'COMPLETED';
+    const linkedRework = completing
+      ? await this.prisma.rework.findFirst({ where: { reworkProductionId: id, status: 'IN_PROGRESS' } })
+      : null;
+    if (linkedRework) {
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const row = await tx.productionEntry.update({ where: { id }, data, include: PRODUCTION_INCLUDE });
+        await writeAuditLog(tx, caller, 'PRODUCTION_UPDATED', 'ProductionEntry', id, {
+          before: { status: entry.status, pageCount: entry.pageCount, totalICDs: entry.totalICDs, totalDOS: entry.totalDOS, codedDate: isoDay(entry.codedDate) },
+          after: { status: row.status, pageCount: row.pageCount, totalICDs: row.totalICDs, totalDOS: row.totalDOS, codedDate: isoDay(row.codedDate) },
+        });
+        await writeAuditLog(tx, caller, 'REWORK_RESOLVED', 'ProductionEntry', id, { after: { chartId: row.chartId, version: row.version } });
+        await resolveRework(tx, caller, linkedRework, dto.remarks?.trim() || null);
+        return row;
+      });
+      return toProductionDto(updated);
+    }
 
     const updated = await this.prisma.productionEntry.update({
       where: { id },
-      data: {
-        ...(dto.pageCount !== undefined ? { pageCount: dto.pageCount } : {}),
-        ...(dto.totalICDs !== undefined ? { totalICDs: dto.totalICDs } : {}),
-        ...(dto.totalDOS !== undefined ? { totalDOS: dto.totalDOS } : {}),
-        ...(dto.status !== undefined ? { status: dto.status } : {}),
-        ...(dto.remarks !== undefined ? { remarks: dto.remarks.trim() || null } : {}),
-        ...(codedDate ? { codedDate } : {}),
-      },
+      data,
       include: PRODUCTION_INCLUDE,
     });
 
@@ -283,6 +307,8 @@ export class ProductionService {
           before: { productionEntryId: id, version: entry.version, status: 'COMPLETED' },
           after: { chartId: entry.chartId, version: next.version, status: 'REWORK' },
         });
+        // If an Auditor sent this version back, the new version is the correction.
+        await linkReworkVersion(tx, caller, id, next.id);
         return next;
       });
       return toProductionDto(created);

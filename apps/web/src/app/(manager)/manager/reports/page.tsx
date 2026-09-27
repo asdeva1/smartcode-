@@ -12,7 +12,7 @@ export default function Page() {
         description="Production, audit, coder and auditor summaries."
         breadcrumb={<Breadcrumb items={[{ label: 'Manager', href: '/manager' }, { label: 'Reports' }]} />}
       />
-      <ReportsView reports={REPORTS_BY_ROLE.MANAGER} />
+      <ReportsView reports={REPORTS_BY_ROLE.MANAGER} role="MANAGER" />
     </>
   );
 }

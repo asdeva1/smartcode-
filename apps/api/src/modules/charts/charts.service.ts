@@ -6,6 +6,7 @@ import { ExportService } from '../../common/export/export.service';
 import { PERSON_SELECT, PROJECT_SELECT, chartScope, isoDay, personRef, projectRef } from '../../common/scope';
 import { PRODUCTION_INCLUDE, toProductionDto } from '../production/production.service';
 import { AUDIT_INCLUDE, toAuditDto } from '../audits/audit.mapper';
+import { vendorChartWhere } from '../../common/vendor-scope';
 import { ListChartsDto } from './dto/list-charts.dto';
 
 const CHART_INCLUDE = {
@@ -71,6 +72,7 @@ export class ChartsService {
     if (q.rework === 'yes') {
       and.push({ productionEntries: { some: { isCurrent: true, OR: [{ status: 'REWORK' }, { version: { gt: 1 } }] } } });
     }
+    if (q.vendorId) and.push(vendorChartWhere(q.vendorId));
     return { AND: and };
   }
 

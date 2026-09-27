@@ -164,6 +164,7 @@ describe('UsersService - Auditor management', () => {
             role: 'AUDITOR',
             isActive: true,
             createdAt: existingAuditor.createdAt,
+            vendor: null,
           },
         ],
         total: 1,

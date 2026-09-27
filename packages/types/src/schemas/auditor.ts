@@ -39,6 +39,8 @@ export const AuditorSchema = z.object({
   role: z.literal('AUDITOR'),
   isActive: z.boolean(),
   createdAt: z.string(),
+  /** The vendor this Auditor is actively assigned to, if any. */
+  vendor: z.object({ id: z.string().uuid(), name: z.string() }).nullable().optional(),
 });
 export type Auditor = z.infer<typeof AuditorSchema>;
 

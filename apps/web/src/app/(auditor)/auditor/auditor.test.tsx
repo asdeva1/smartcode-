@@ -124,6 +124,8 @@ describe('Auditor - Audit Entry', () => {
     routeApi(fetchMock, { 'GET /charts/CH-100/production': lookup(), 'POST /audits': audit({ status }) });
     const user = userEvent.setup();
     renderWithProviders(<AuditEntryPage />);
+    // "Rework" sends the chart back to the Coder and now requires the reason (in Remarks).
+    if (status === 'REJECTED') await user.type(await screen.findByLabelText('Remarks'), 'ICD missing for DOS 2');
     await user.click(await screen.findByRole('button', { name: label }));
     await waitFor(() => expect(callsTo(fetchMock, '/audits', 'POST')).toHaveLength(1));
     expect(JSON.parse(callsTo(fetchMock, '/audits', 'POST')[0][1].body).status).toBe(status);

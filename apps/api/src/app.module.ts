@@ -13,6 +13,9 @@ import { ChartsModule } from './modules/charts/charts.module';
 import { AuditsModule } from './modules/audits/audits.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { HealthModule } from './modules/health/health.module';
+import { VendorsModule } from './modules/vendors/vendors.module';
+import { ReworkModule } from './modules/rework/rework.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { envValidationSchema } from './config/env.validation';
 
@@ -38,6 +41,9 @@ import { envValidationSchema } from './config/env.validation';
     ChartsModule,
     AuditsModule,
     ReportsModule,
+    VendorsModule,
+    ReworkModule,
+    NotificationsModule,
     HealthModule,
   ],
   providers: [

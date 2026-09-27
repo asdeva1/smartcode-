@@ -11,8 +11,14 @@ import { UpdateAuditorDto } from './dto/update-auditor.dto';
 import { ListAuditorsDto } from './dto/list-auditors.dto';
 import { CreateCoderDto } from './dto/create-coder.dto';
 import { requireTeam } from '../../common/scope';
+import { assertProjectAuditorsFit, userVendorId } from '../../common/vendor-scope';
 import { writeAuditLog } from '../../common/audit-log';
 import { toCoderDto } from './coder.mapper';
+
+/** The user's single active vendor, shown on the Manager's Team Lead / Auditor lists. */
+const ACTIVE_VENDOR_INCLUDE = {
+  vendorAssignments: { where: { isActive: true }, select: { vendor: { select: { id: true, name: true } } }, take: 1 },
+} as const;
 
 @Injectable()
 export class UsersService {
@@ -28,6 +34,7 @@ export class UsersService {
     creator: AuthUser,
     targetRole: Role,
     dto: CreateUserDto,
+    extra: { vendorId?: string } = {},
   ) {
     if (!canCreateRole(creator.role, targetRole)) {
       await this.prisma.auditLog.create({
@@ -68,6 +75,8 @@ export class UsersService {
         role: targetRole,
         createdById: creator.id,
         teamId,
+        // Only Vendor accounts are linked to a vendor directly.
+        ...(targetRole === 'VENDOR' && extra.vendorId ? { vendorId: extra.vendorId } : {}),
       },
     });
 
@@ -95,11 +104,13 @@ export class UsersService {
    */
   async createTeamLead(caller: AuthUser, dto: CreateTeamLeadDto) {
     if (dto.teamId) {
-      const team = await this.prisma.team.findUnique({ where: { id: dto.teamId } });
+      const team = await this.prisma.team.findUnique({ where: { id: dto.teamId }, include: { projects: { select: { id: true } } } });
       if (!team) throw new NotFoundException('Team not found');
       if (team.teamLeadId) {
         throw new ConflictException('This team already has a Team Lead assigned');
       }
+      // A brand-new Team Lead has no vendor, so the team's projects must not hold vendor Auditors.
+      await assertProjectAuditorsFit(this.prisma, team.projects?.map((p) => p.id) ?? [], null, 'Cannot assign this team');
     }
 
     // confirmPassword was already checked by CreateTeamLeadDto; it is
@@ -154,7 +165,7 @@ export class UsersService {
     if (!target) throw new NotFoundException('User not found');
 
     const allowed =
-      (caller.role === 'MANAGER' && (target.role === 'TEAM_LEAD' || target.role === 'AUDITOR')) ||
+      (caller.role === 'MANAGER' && (target.role === 'TEAM_LEAD' || target.role === 'AUDITOR' || target.role === 'VENDOR')) ||
       // caller.teamId must be non-null: a Team Lead without a team must
       // never match an unassigned Coder through null === null.
       (caller.role === 'TEAM_LEAD' &&
@@ -203,6 +214,7 @@ export class UsersService {
     if (query.status === 'active') where.isActive = true;
     if (query.status === 'inactive') where.isActive = false;
     if (query.teamId) where.teamId = query.teamId;
+    if (query.vendorId) where.vendorAssignments = { some: { vendorId: query.vendorId, isActive: true } };
     if (query.search) {
       const search = query.search.trim();
       where.OR = [
@@ -216,7 +228,7 @@ export class UsersService {
     const [rows, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
-        include: { team: { select: { id: true, name: true } } },
+        include: { team: { select: { id: true, name: true } }, ...ACTIVE_VENDOR_INCLUDE },
         orderBy: { createdAt: 'desc' },
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
@@ -261,10 +273,15 @@ export class UsersService {
       if (dto.teamId === null) {
         await this.prisma.team.updateMany({ where: { teamLeadId: id }, data: { teamLeadId: null } });
       } else {
-        const team = await this.prisma.team.findUnique({ where: { id: dto.teamId } });
+        const team = await this.prisma.team.findUnique({ where: { id: dto.teamId }, include: { projects: { select: { id: true } } } });
         if (!team) throw new NotFoundException('Team not found');
         if (team.teamLeadId && team.teamLeadId !== id) {
           throw new ConflictException('This team already has a Team Lead assigned');
+        }
+        // The team moves into this Team Lead's vendor (or out of any vendor).
+        const projectIds = team.projects?.map((p) => p.id) ?? [];
+        if (projectIds.length) {
+          await assertProjectAuditorsFit(this.prisma, projectIds, await userVendorId(this.prisma, id), 'Cannot assign this team');
         }
         await this.prisma.team.updateMany({ where: { teamLeadId: id }, data: { teamLeadId: null } });
         await this.prisma.team.update({ where: { id: dto.teamId }, data: { teamLeadId: id } });
@@ -321,6 +338,7 @@ export class UsersService {
       isActive: user.isActive,
       createdAt: user.createdAt,
       team: user.team ?? null,
+      vendor: user.vendorAssignments?.[0]?.vendor ?? null,
     };
   }
 
@@ -344,6 +362,7 @@ export class UsersService {
     }
 
     const where: Record<string, unknown> = { role: 'AUDITOR' as const };
+    if (query.vendorId) where.vendorAssignments = { some: { vendorId: query.vendorId, isActive: true } };
     const search = query.search?.trim();
     if (search) {
       where.OR = [
@@ -357,6 +376,7 @@ export class UsersService {
     const [rows, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
+        include: ACTIVE_VENDOR_INCLUDE,
         orderBy: { createdAt: 'desc' },
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
@@ -438,6 +458,7 @@ export class UsersService {
       role: user.role,
       isActive: user.isActive,
       createdAt: user.createdAt,
+      vendor: user.vendorAssignments?.[0]?.vendor ?? null,
     };
   }
 }

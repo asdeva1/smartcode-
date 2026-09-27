@@ -23,6 +23,7 @@ import { useTeamLeads, useSetTeamLeadActive } from '@/features/team-leads/use-te
 import { useTeams } from '@/features/team-leads/use-teams';
 import { CreateTeamLeadDialog } from '@/features/team-leads/CreateTeamLeadDialog';
 import { EditTeamLeadDialog } from '@/features/team-leads/EditTeamLeadDialog';
+import { VendorFilter } from '@/components/data/VendorFilter';
 
 const PAGE_SIZE = 25;
 
@@ -32,6 +33,7 @@ export default function TeamLeadsPage() {
   const [search, setSearch] = React.useState('');
   const [status, setStatus] = React.useState<'all' | 'active' | 'inactive'>('all');
   const [teamId, setTeamId] = React.useState('');
+  const [vendorId, setVendorId] = React.useState('');
   const [createOpen, setCreateOpen] = React.useState(false);
   const [editTarget, setEditTarget] = React.useState<TeamLead | null>(null);
   const [confirmTarget, setConfirmTarget] = React.useState<TeamLead | null>(null);
@@ -44,6 +46,7 @@ export default function TeamLeadsPage() {
     search: search || undefined,
     status,
     teamId: teamId || undefined,
+    vendorId: vendorId || undefined,
   });
   const setActive = useSetTeamLeadActive();
 
@@ -119,6 +122,7 @@ export default function TeamLeadsPage() {
           ]}
           sx={{ minWidth: 180 }}
         />
+        <VendorFilter value={vendorId} onChange={(v) => handleFilterChange(() => setVendorId(v))} />
         <IconButton onClick={() => refetch()} aria-label="Refresh" disabled={isFetching}>
           <RefreshCw size={18} />
         </IconButton>
@@ -140,6 +144,7 @@ export default function TeamLeadsPage() {
               { key: 'loginName', header: 'Login Name', render: (r) => r.loginName },
               { key: 'email', header: 'Email', render: (r) => r.email },
               { key: 'team', header: 'Team', render: (r) => r.team?.name ?? '—' },
+              { key: 'vendor', header: 'Vendor', render: (r) => r.vendor?.name ?? '—' },
               {
                 key: 'status',
                 header: 'Status',

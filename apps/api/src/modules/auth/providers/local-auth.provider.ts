@@ -5,7 +5,14 @@ import * as argon2 from 'argon2';
 import type { AuthUser, TokenPair } from '@smartcode/types';
 import { PrismaService } from '../../../prisma/prisma.service';
 import type { AuthProvider } from './auth-provider.interface';
-import { resolveTeamId } from '../resolve-team-id';
+import {
+  SESSION_USER_INCLUDE,
+  assertVendorAccountUsable,
+  passwordStamp,
+  toSessionUser,
+  tokenMatchesPassword,
+  type SessionUserRow,
+} from '../session-user';
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
@@ -29,7 +36,7 @@ export class LocalAuthProvider implements AuthProvider {
   async validateCredentials(loginName: string, password: string): Promise<AuthUser | null> {
     const user = await this.prisma.user.findUnique({
       where: { loginName },
-      include: { leadsTeam: { select: { id: true } } },
+      include: SESSION_USER_INCLUDE,
     });
     if (!user || !user.isActive) return null;
 
@@ -52,6 +59,9 @@ export class LocalAuthProvider implements AuthProvider {
       return null;
     }
 
+    // Checked only after a correct password, so it never reveals which accounts exist.
+    assertVendorAccountUsable(user);
+
     await this.prisma.user.update({
       where: { id: user.id },
       data: { failedLoginCount: 0, lockedUntil: null, lastLoginAt: new Date() },
@@ -61,7 +71,9 @@ export class LocalAuthProvider implements AuthProvider {
   }
 
   async issueTokens(user: AuthUser): Promise<TokenPair> {
-    const payload = { sub: user.id, role: user.role };
+    // `pwd` ties the token to the current password; see session-user.ts.
+    const stamp = await this.prisma.user.findUnique({ where: { id: user.id }, select: { passwordChangedAt: true } });
+    const payload = { sub: user.id, role: user.role, pwd: passwordStamp(stamp?.passwordChangedAt) };
     const accessToken = await this.jwt.signAsync(payload, {
       secret: this.config.get<string>('JWT_ACCESS_SECRET'),
       expiresIn: this.config.get<string>('JWT_ACCESS_EXPIRY'),
@@ -77,10 +89,11 @@ export class LocalAuthProvider implements AuthProvider {
     const payload = await this.jwt.verifyAsync(token, {
       secret: this.config.get<string>('JWT_ACCESS_SECRET'),
     });
-    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
-    if (!user || !user.isActive) {
+    const user = await this.prisma.user.findUnique({ where: { id: payload.sub }, include: SESSION_USER_INCLUDE });
+    if (!user || !user.isActive || !tokenMatchesPassword(payload, user.passwordChangedAt)) {
       throw new UnauthorizedException('User not found or inactive');
     }
+    assertVendorAccountUsable(user);
     return this.toAuthUser(user);
   }
 
@@ -88,10 +101,16 @@ export class LocalAuthProvider implements AuthProvider {
     const payload = await this.jwt.verifyAsync(refreshToken, {
       secret: this.config.get<string>('JWT_REFRESH_SECRET'),
     });
-    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+    const user = await this.prisma.user.findUnique({ where: { id: payload.sub }, include: SESSION_USER_INCLUDE });
     if (!user || !user.isActive) {
       throw new UnauthorizedException('User not found or inactive');
     }
+    // A refresh token issued before a password change can no longer mint
+    // new sessions - this is what "invalidate existing sessions" means here.
+    if (!tokenMatchesPassword(payload, user.passwordChangedAt)) {
+      throw new UnauthorizedException('Your password was changed - please sign in again');
+    }
+    assertVendorAccountUsable(user);
     // Deliberately does not consult a revocation list - see
     // revokeRefreshToken() below for why that's a real, documented gap
     // rather than a silent one.
@@ -131,27 +150,8 @@ export class LocalAuthProvider implements AuthProvider {
     return;
   }
 
-  private toAuthUser(user: {
-    id: string;
-    employeeId: string;
-    loginName: string;
-    email: string;
-    fullName?: string | null;
-    role: string;
-    teamId: string | null;
-    leadsTeam?: { id: string } | null;
-    isActive: boolean;
-  }): AuthUser {
-    return {
-      id: user.id,
-      employeeId: user.employeeId,
-      loginName: user.loginName,
-      email: user.email,
-      fullName: user.fullName ?? null,
-      role: user.role as AuthUser['role'],
-      teamId: resolveTeamId(user),
-      isActive: user.isActive,
-    };
+  private toAuthUser(user: SessionUserRow): AuthUser {
+    return toSessionUser(user);
   }
 
   static async hashPassword(password: string): Promise<string> {

@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import type { AuthUser } from '@smartcode/types';
 import { PrismaService } from '../../prisma/prisma.service';
+import { vendorTeamWhere } from '../../common/vendor-scope';
 import { CreateTeamDto } from './dto/create-team.dto';
 
 /**
@@ -39,8 +40,10 @@ export class TeamsService {
     return team;
   }
 
-  async findAll() {
+  /** All teams, optionally only one vendor's (teams whose Team Lead is actively assigned to it). */
+  async findAll(vendorId?: string) {
     return this.prisma.team.findMany({
+      ...(vendorId ? { where: vendorTeamWhere(vendorId) } : {}),
       include: { teamLead: { select: { id: true, employeeId: true, loginName: true } } },
       orderBy: { createdAt: 'desc' },
     });

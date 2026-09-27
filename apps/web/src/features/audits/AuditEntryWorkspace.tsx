@@ -12,6 +12,7 @@ import { z } from 'zod';
 import {
   ChartIdSchema,
   ReauditSchema,
+  ReworkReasonSchema,
   calculateTotalErrors,
   type AuditEntry,
   type ChartProductionLookup,
@@ -125,6 +126,14 @@ function LookupResult({ data }: { data: ChartProductionLookup }) {
         </FormSection>
       </Paper>
 
+      {data.rework && (
+        <Alert severity="info">
+          This version is the Coder&apos;s correction of an earlier rework ({data.rework.status.toLowerCase().replace('_', ' ')}). Reason was:{' '}
+          <strong>{data.rework.reason}</strong>
+          {data.rework.resolutionNote ? ` - Coder: ${data.rework.resolutionNote}` : ''}
+        </Alert>
+      )}
+
       {mode ? (
         <AuditForm
           mode={mode}
@@ -180,6 +189,7 @@ function AuditForm({
     register,
     handleSubmit,
     watch,
+    setError,
     formState: { errors },
   } = useForm<AuditFormValues>({
     resolver: zodResolver(AuditFormSchema),
@@ -193,6 +203,14 @@ function AuditForm({
   const send = (status: SubmitStatus) =>
     handleSubmit((values) => {
       setServerError(null);
+      // "Rework" sends the chart back to the Coder - the reason is mandatory (the server enforces it too).
+      if (status === 'REJECTED') {
+        const reason = ReworkReasonSchema.safeParse(values.remarks ?? '');
+        if (!reason.success) {
+          setError('remarks', { message: reason.error.issues[0].message });
+          return;
+        }
+      }
       const input = { ...values, status, remarks: values.remarks || undefined };
       const req =
         mode === 'create'
@@ -227,7 +245,14 @@ function AuditForm({
             <DatePicker label="Audit Date" error={!!errors.auditDate} helperText={errors.auditDate?.message} {...asInputRef(register('auditDate'))} />
           </Grid>
           <Grid item xs={12} sm={8}>
-            <Input label="Remarks" multiline minRows={2} error={!!errors.remarks} helperText={errors.remarks?.message} {...register('remarks')} />
+            <Input
+              label="Remarks"
+              multiline
+              minRows={2}
+              error={!!errors.remarks}
+              helperText={errors.remarks?.message ?? 'Required as the rework reason when you choose Rework'}
+              {...register('remarks')}
+            />
           </Grid>
         </Grid>
         <Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap" useFlexGap>

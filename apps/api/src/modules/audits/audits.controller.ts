@@ -56,14 +56,14 @@ export class AuditsController {
   }
 
   @Get('audits')
-  @Roles('AUDITOR', 'TEAM_LEAD', 'MANAGER')
+  @Roles('AUDITOR', 'TEAM_LEAD', 'MANAGER', 'VENDOR')
   @ApiOperation({ summary: 'List audits (own / team charts / all)' })
   list(@CurrentUser() caller: AuthUser, @Query() query: ListAuditsDto) {
     return this.audits.list(caller, query);
   }
 
   @Get('audits/export')
-  @Roles('AUDITOR', 'TEAM_LEAD', 'MANAGER')
+  @Roles('AUDITOR', 'TEAM_LEAD', 'MANAGER', 'VENDOR')
   @ApiOperation({ summary: 'Export scoped audits (format=csv|xlsx|pdf) honouring list filters' })
   export(@CurrentUser() caller: AuthUser, @Query() query: ExportAuditsDto) {
     return this.audits.export(caller, parseExportFormat(query.format), query);
@@ -88,7 +88,7 @@ export class AuditsController {
   }
 
   @Get('audits/:id')
-  @Roles('AUDITOR', 'TEAM_LEAD', 'MANAGER')
+  @Roles('AUDITOR', 'TEAM_LEAD', 'MANAGER', 'VENDOR')
   @ApiOperation({ summary: 'Get one scoped audit' })
   get(@CurrentUser() caller: AuthUser, @Param('id') id: string) {
     return this.audits.get(caller, id);
