@@ -22,6 +22,7 @@ import { LocalAuthProvider } from '../auth/providers/local-auth.provider';
 import { ExportService } from '../../common/export/export.service';
 import { readCsvUpload, toRecords, type UploadedCsvFile } from '../../common/csv/csv-upload';
 import { isUniqueViolation, requireTeam } from '../../common/scope';
+import { requireVendor } from '../../common/vendor-scope';
 import { writeAuditLog } from '../../common/audit-log';
 import { CreateCoderDto } from './dto/create-coder.dto';
 import { UpdateCoderDto } from './dto/update-coder.dto';
@@ -30,16 +31,39 @@ import { toCoderDto } from './coder.mapper';
 
 const PASSWORD_FIELDS = new Set(['password', 'confirmPassword']);
 
+/**
+ * Section 2/3/10: "View assigned Team Lead" / "View assigned Project(s)" /
+ * Coder profile's "Vendor" field - Team Lead and Project(s) are derived
+ * through the Coder's current team; Vendor is the authoritative
+ * User.vendorId set once at creation (see docs/09-BUSINESS-RULES.md
+ * "Vendor -> Team Lead -> Coder Hierarchy").
+ */
+const TEAM_INCLUDE = {
+  team: {
+    select: {
+      id: true,
+      name: true,
+      teamLead: { select: { id: true, fullName: true, employeeId: true, loginName: true } },
+      projects: { select: { id: true, name: true }, where: { isActive: true }, orderBy: { name: 'asc' } },
+    },
+  },
+  vendor: { select: { id: true, name: true } },
+} as const;
+
 interface ValidatedCoderRow {
   result: ImportRowResult;
   dto: CreateCoderDto | null;
 }
 
 /**
- * Team Lead -> Coder management beyond creation (which lives in
+ * Team Lead / Vendor -> Coder management beyond creation (which lives in
  * UsersService.createCoder so the existing POST /team-leads/coders
- * contract is unchanged). Every method re-derives the caller's team from
- * the session; a client-supplied team is never trusted.
+ * contract is unchanged). Every method re-derives the caller's team or
+ * vendor from the session; a client-supplied id is never trusted.
+ *
+ * CSV import/export stay Team-Lead-only (assertCanImport) - the Vendor
+ * Portal's Coder screen (docs/09-BUSINESS-RULES.md "Coder Creation From
+ * Vendor Portal") only asks for create/view/edit/activate/deactivate.
  */
 @Injectable()
 export class CodersService {
@@ -49,8 +73,9 @@ export class CodersService {
   ) {}
 
   private scope(caller: AuthUser): Prisma.UserWhereInput {
-    if (caller.role !== 'TEAM_LEAD') throw new ForbiddenException('Only a Team Lead manages Coders');
-    return { role: 'CODER', teamId: requireTeam(caller) };
+    if (caller.role === 'TEAM_LEAD') return { role: 'CODER', teamId: requireTeam(caller) };
+    if (caller.role === 'VENDOR') return { role: 'CODER', vendorId: requireVendor(caller) };
+    throw new ForbiddenException('Only a Team Lead or a Vendor manages Coders');
   }
 
   private where(caller: AuthUser, query: Pick<ListCodersDto, 'search' | 'status'>): Prisma.UserWhereInput {
@@ -74,6 +99,7 @@ export class CodersService {
     const [rows, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
+        include: TEAM_INCLUDE,
         orderBy: { createdAt: 'desc' },
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
@@ -84,9 +110,9 @@ export class CodersService {
   }
 
   private async findOwn(caller: AuthUser, id: string) {
-    const user = await this.prisma.user.findFirst({ where: { id, ...this.scope(caller) } });
-    // Same 404 for "doesn't exist" and "another team's user" - no cross-team probing.
-    if (!user) throw new NotFoundException('Coder not found on your team');
+    const user = await this.prisma.user.findFirst({ where: { id, ...this.scope(caller) }, include: TEAM_INCLUDE });
+    // Same 404 for "doesn't exist" and "outside your scope" - no cross-team/cross-vendor probing.
+    if (!user) throw new NotFoundException('Coder not found in your scope');
     return user;
   }
 

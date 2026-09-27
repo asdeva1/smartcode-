@@ -12,15 +12,17 @@ export type Role = (typeof ROLES)[number];
  * set of roles it is permitted to create.
  *
  * MANAGER creates TEAM_LEAD, AUDITOR and VENDOR (vendor login accounts).
- * TEAM_LEAD creates CODER.
- * CODER, AUDITOR and VENDOR create no one.
+ * TEAM_LEAD creates CODER (own team).
+ * VENDOR creates CODER (own vendor - see docs/09-BUSINESS-RULES.md
+ * "Vendor -> Team Lead -> Coder Hierarchy").
+ * CODER and AUDITOR create no one.
  */
 export const CREATION_HIERARCHY: Record<Role, Role[]> = {
   MANAGER: ['TEAM_LEAD', 'AUDITOR', 'VENDOR'],
   TEAM_LEAD: ['CODER'],
+  VENDOR: ['CODER'],
   CODER: [],
   AUDITOR: [],
-  VENDOR: [],
 };
 
 /** Human-readable role names for the UI. */

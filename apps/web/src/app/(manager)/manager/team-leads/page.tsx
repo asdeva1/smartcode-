@@ -24,6 +24,8 @@ import { useTeams } from '@/features/team-leads/use-teams';
 import { CreateTeamLeadDialog } from '@/features/team-leads/CreateTeamLeadDialog';
 import { EditTeamLeadDialog } from '@/features/team-leads/EditTeamLeadDialog';
 import { VendorFilter } from '@/components/data/VendorFilter';
+import { ResetPasswordDialog, type ResetPasswordTarget } from '@/features/users/ResetPasswordDialog';
+import { ChangeLoginNameDialog, type ChangeLoginNameTarget } from '@/features/users/ChangeLoginNameDialog';
 
 const PAGE_SIZE = 25;
 
@@ -38,6 +40,8 @@ export default function TeamLeadsPage() {
   const [editTarget, setEditTarget] = React.useState<TeamLead | null>(null);
   const [confirmTarget, setConfirmTarget] = React.useState<TeamLead | null>(null);
   const [menuAnchor, setMenuAnchor] = React.useState<{ el: HTMLElement; row: TeamLead } | null>(null);
+  const [resetTarget, setResetTarget] = React.useState<ResetPasswordTarget | null>(null);
+  const [loginNameTarget, setLoginNameTarget] = React.useState<ChangeLoginNameTarget | null>(null);
 
   const { data: teams } = useTeams();
   const { data, isLoading, isError, refetch, isFetching } = useTeamLeads({
@@ -190,6 +194,22 @@ export default function TeamLeadsPage() {
         >
           View / Edit
         </MenuItem>
+        <MenuItem
+          onClick={() => {
+            if (menuAnchor) setResetTarget({ id: menuAnchor.row.id, label: menuAnchor.row.fullName ?? menuAnchor.row.loginName });
+            setMenuAnchor(null);
+          }}
+        >
+          Reset Password
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            if (menuAnchor) setLoginNameTarget({ id: menuAnchor.row.id, label: menuAnchor.row.fullName ?? menuAnchor.row.loginName, currentLoginName: menuAnchor.row.loginName });
+            setMenuAnchor(null);
+          }}
+        >
+          Change Login Name
+        </MenuItem>
         {menuAnchor?.row.isActive ? (
           <MenuItem
             onClick={() => {
@@ -213,6 +233,8 @@ export default function TeamLeadsPage() {
 
       <CreateTeamLeadDialog open={createOpen} onClose={() => setCreateOpen(false)} />
       <EditTeamLeadDialog open={!!editTarget} onClose={() => setEditTarget(null)} teamLead={editTarget} />
+      <ResetPasswordDialog target={resetTarget} onClose={() => setResetTarget(null)} />
+      <ChangeLoginNameDialog target={loginNameTarget} onClose={() => setLoginNameTarget(null)} onChanged={() => refetch()} />
       <ConfirmDialog
         open={!!confirmTarget}
         title="Deactivate Team Lead"

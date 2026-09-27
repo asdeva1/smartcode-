@@ -118,16 +118,16 @@ export class VendorsController {
 
   @Post('vendors/:id/team-leads')
   @Roles('MANAGER')
-  @ApiOperation({ summary: 'Assign a Team Lead (and so their team) to the vendor' })
+  @ApiOperation({ summary: "Assign (or change) the vendor's Team Lead - all active Coders under this vendor automatically move onto them" })
   assignTeamLead(@CurrentUser() caller: AuthUser, @Param('id') id: string, @Body() dto: AssignVendorUserDto) {
-    return this.vendors.assign(caller, id, 'TEAM_LEAD', dto.userId);
+    return this.vendors.assignTeamLead(caller, id, dto.userId);
   }
 
   @Delete('vendors/:id/team-leads/:userId')
   @Roles('MANAGER')
-  @ApiOperation({ summary: 'Remove a Team Lead assignment (kept as history, audit-logged)' })
+  @ApiOperation({ summary: 'Remove a Team Lead assignment (kept as history, audit-logged); the vendor\'s active Coders are detached, not left stale' })
   removeTeamLead(@CurrentUser() caller: AuthUser, @Param('id') id: string, @Param('userId') userId: string) {
-    return this.vendors.unassign(caller, id, 'TEAM_LEAD', userId);
+    return this.vendors.removeTeamLead(caller, id, userId);
   }
 
   @Post('vendors/:id/auditors')

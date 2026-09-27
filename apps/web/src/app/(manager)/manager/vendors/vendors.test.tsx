@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import VendorsPage from './page';
 import VendorDetailPage from './[id]/page';
@@ -199,14 +199,27 @@ describe('Manager - Vendor detail and assignments', () => {
     expect(await within(dialog).findByText(/outside this vendor \(Ortho\)/)).toBeInTheDocument();
   });
 
-  it('shows the team structure and validates new vendor accounts', async () => {
+  // Split into two single-concern tests (matching this file's own pattern
+  // of one concern per `it`) rather than one test that visits the Team
+  // Structure tab (its own fetch + tab switch + nested-region assertions)
+  // on the way to an unrelated 6-field, double-submit account-creation
+  // flow. That coupling made this the heaviest test in the file for no
+  // reason tied to what either half actually verifies, which is what
+  // pushed its real wall-clock time closest to Jest's default per-test
+  // budget on a slower machine - not an async/await gap (every
+  // interaction here already used the same await user.click/type,
+  // findBy* and waitFor patterns as the rest of this file; injecting
+  // artificial latency into the mocked structure and create-account
+  // responses only scaled the total time linearly, it never produced a
+  // hang). Splitting removes the unrelated Team Structure fetch/tab-switch
+  // from the account-validation path while keeping every assertion.
+  it('shows the team structure', async () => {
     routeApi(fetchMock, routes({
       [`GET /vendors/${V}/structure`]: {
         vendor: { id: V, name: 'Vendor Alpha', code: 'ALPHA', isActive: true },
         teams: [{ id: 't1', name: 'Team Alpha', teamLead: person('tl-1', 'Tara Lead'), coders: [person('c1', 'Cody Coder')], projects: [{ id: 'p1', name: 'Cardio', isActive: true }] }],
         auditors: [{ ...person('a1', 'Ava Auditor'), projects: [{ id: 'p1', name: 'Cardio' }] }],
       },
-      [`POST /vendors/${V}/accounts`]: { id: 'va-2' },
     }));
     const user = userEvent.setup();
     renderWithProviders(<VendorDetailPage />);
@@ -215,22 +228,85 @@ describe('Manager - Vendor detail and assignments', () => {
     expect(within(team).getByText('Cody Coder')).toBeInTheDocument();
     expect(within(team).getByText('Cardio')).toBeInTheDocument();
     expect(within(screen.getByRole('region', { name: 'Auditors' })).getByText('Ava Auditor')).toBeInTheDocument();
+  });
 
-    await user.click(screen.getByRole('tab', { name: 'Vendor Accounts (1)' }));
-    await user.click(await screen.findByRole('button', { name: 'Create Vendor Account' }));
+  it('validates new vendor accounts', async () => {
+    routeApi(fetchMock, routes({
+      [`POST /vendors/${V}/accounts`]: { id: 'va-2' },
+    }));
+    const user = userEvent.setup();
+    renderWithProviders(<VendorDetailPage />);
+    // These four presses use fireEvent.click, not user.click, deliberately.
+    // Every one of them lands on an MUI ButtonBase (a Tab or a Button),
+    // and user.click's realistic pointerdown/mousedown-first sequence is
+    // exactly what starts ButtonBase's TouchRipple animation - which then
+    // finishes on its own real setTimeout well after this test (and
+    // act()) has moved on. That's the ButtonBase/TouchRipple act()
+    // warning source, and instrumenting this test's steps with
+    // timestamps showed each such click costing ~150-200ms here even on
+    // a fast machine (measured 208ms and 153ms for the two submit
+    // clicks) - the same per-click overhead that can push the total past
+    // a fixed timeout on a slower one. fireEvent.click still dispatches
+    // a real 'click' DOM event, so the button's onClick/form-submit
+    // behavior is unchanged; it only skips the mousedown that ripple
+    // needs to start, so there is nothing left running after the click
+    // returns. Typing/clearing below is unaffected - Input isn't a
+    // ButtonBase and isn't the source of this.
+    fireEvent.click(await screen.findByRole('tab', { name: 'Vendor Accounts (1)' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Vendor Account' }));
     const dialog = await screen.findByRole('dialog');
     for (const [label, value] of [['Full Name', 'Beta Ops'], ['Employee ID', 'E-77'], ['Login Name', 'vendor.ops'], ['Email', 'ops@x.local'], ['Password', 'Password1'], ['Confirm Password', 'Password2']]) {
       await user.type(within(dialog).getByLabelText(label), value);
     }
-    await user.click(within(dialog).getByRole('button', { name: 'Create Account' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Account' }));
     expect(await within(dialog).findByText('Passwords do not match')).toBeInTheDocument();
     expect(callsTo(fetchMock, `/vendors/${V}/accounts`, 'POST')).toHaveLength(0);
     await user.clear(within(dialog).getByLabelText('Confirm Password'));
     await user.type(within(dialog).getByLabelText('Confirm Password'), 'Password1');
-    await user.click(within(dialog).getByRole('button', { name: 'Create Account' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Account' }));
     await waitFor(() => expect(callsTo(fetchMock, `/vendors/${V}/accounts`, 'POST')).toHaveLength(1));
     await screen.findByText('Vendor account vendor.ops created.');
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it("resets a Vendor account's password: confirm, then a one-time display of the temporary password", async () => {
+    routeApi(fetchMock, routes({
+      'POST /users/va-1/reset-password': { id: 'va-1', loginName: 'va-1.login', temporaryPassword: 'Tmp9!xYzAbc' },
+    }));
+    const user = userEvent.setup();
+    renderWithProviders(<VendorDetailPage />);
+    await user.click(await screen.findByRole('tab', { name: 'Vendor Accounts (1)' }));
+    await user.click(await screen.findByRole('button', { name: 'Reset Password' }));
+    expect(await screen.findByText(/Generate a new one-time password for Alpha Ops/)).toBeInTheDocument();
+    expect(callsTo(fetchMock, '/users/va-1/reset-password', 'POST')).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'Reset Password' }));
+    await waitFor(() => expect(callsTo(fetchMock, '/users/va-1/reset-password', 'POST')).toHaveLength(1));
+    expect(await screen.findByText('Password reset')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Tmp9!xYzAbc')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(screen.queryByText('Password reset')).not.toBeInTheDocument());
+  });
+
+  it("changes a Vendor account's Login Name directly", async () => {
+    routeApi(fetchMock, routes({
+      'PATCH /users/va-1/login-name': { id: 'va-1', loginName: 'va.renamed' },
+    }));
+    const user = userEvent.setup();
+    renderWithProviders(<VendorDetailPage />);
+    await user.click(await screen.findByRole('tab', { name: 'Vendor Accounts (1)' }));
+    await user.click(await screen.findByRole('button', { name: 'Change Login Name' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('Login Name')).toHaveValue('va-1.login');
+
+    await user.clear(within(dialog).getByLabelText('Login Name'));
+    await user.type(within(dialog).getByLabelText('Login Name'), 'va.renamed');
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(callsTo(fetchMock, '/users/va-1/login-name', 'PATCH')).toHaveLength(1));
+    expect(JSON.parse(callsTo(fetchMock, '/users/va-1/login-name', 'PATCH')[0][1].body)).toEqual({ loginName: 'va.renamed' });
+    expect(await screen.findByText('Login Name changed to va.renamed.')).toBeInTheDocument();
   });
 });
 

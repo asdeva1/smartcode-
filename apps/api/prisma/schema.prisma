@@ -77,8 +77,18 @@ model User {
   team            Team?    @relation("TeamMembers", fields: [teamId], references: [id])
   leadsTeam       Team?    @relation("TeamLead")
 
-  // Only for role VENDOR: the Vendor this login account belongs to.
-  // Team Leads / Auditors are linked through VendorAssignment instead.
+  // For role VENDOR: the Vendor this login account belongs to.
+  // For role CODER: the Vendor this Coder belongs to, set once at
+  // creation (whether created from the Vendor Portal or by a Team Lead
+  // who is themselves assigned to a vendor) and never changed afterwards
+  // - see docs/09-BUSINESS-RULES.md "Vendor -> Team Lead -> Coder
+  // Hierarchy". This is the authoritative pointer used to cascade a
+  // Coder onto whichever Team Lead the Manager currently has assigned to
+  // that vendor (User.teamId is updated to follow it); it exists because
+  // a vendor-created Coder can be created before any Team Lead has been
+  // assigned (teamId null) - team-derived vendor scope alone cannot cover
+  // that case. Team Leads / Auditors continue to be linked to a vendor
+  // through VendorAssignment, not this field.
   vendorId        String?
   vendor          Vendor?  @relation("VendorAccounts", fields: [vendorId], references: [id])
 
@@ -102,6 +112,12 @@ model User {
   reworksAsTeamLead        Rework[]           @relation("ReworkTeamLead")
   reworksResolved          Rework[]           @relation("ReworkResolvedBy")
 
+  // Universal Approval Engine (docs/09-BUSINESS-RULES.md section 9) -
+  // e.g. a Team Lead's Login Name change request for one of their Coders.
+  approvalsAsTarget        ApprovalRequest[]  @relation("ApprovalTarget")
+  approvalsRequested       ApprovalRequest[]  @relation("ApprovalRequestedBy")
+  approvalsReviewed        ApprovalRequest[]  @relation("ApprovalReviewedBy")
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -110,6 +126,13 @@ model User {
   // An additional @@index on the same single column would just be a
   // second, redundant index maintained on every write for no query
   // benefit - removed during the Phase 1 technical review.
+
+  // Added for the Vendor -> Team Lead -> Coder cascade (Manager reassigns
+  // a vendor's Team Lead -> every active Coder with this vendorId is
+  // looked up and moved) - a real, hot query path once a vendor has any
+  // meaningful number of Coders, so it earns its own index rather than
+  // relying on a sequential scan.
+  @@index([vendorId, role, isActive])
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -443,4 +466,57 @@ model AuditLog {
   @@index([entity, entityId])
   @@index([action])
   @@index([timestamp])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Universal Approval Engine
+// ─────────────────────────────────────────────────────────────
+// docs/09-BUSINESS-RULES.md section 9: a Team Lead cannot directly finalize
+// a Coder's Login Name change - they REQUEST it, a Manager must Approve or
+// Reject it, and only an Approve applies the change. Deliberately generic
+// (type + a free-form payload) rather than a Login-Name-specific table, so
+// any future "request now, approve later" workflow reuses this one engine
+// instead of a second, competing approval mechanism.
+
+enum ApprovalType {
+  LOGIN_NAME_CHANGE
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model ApprovalRequest {
+  id     String         @id @default(uuid())
+  type   ApprovalType
+  status ApprovalStatus @default(PENDING)
+
+  // The user the request is about (e.g. the Coder whose Login Name would
+  // change) - distinct from requestedBy, who acts on the target's behalf.
+  targetUserId String
+  targetUser   User   @relation("ApprovalTarget", fields: [targetUserId], references: [id])
+
+  requestedById String
+  requestedBy   User     @relation("ApprovalRequestedBy", fields: [requestedById], references: [id])
+  requestedAt   DateTime @default(now())
+
+  // Type-specific detail, e.g. { currentLoginName, requestedLoginName } for
+  // LOGIN_NAME_CHANGE - keeps this table schema-generic across types.
+  payload Json
+
+  reviewedById    String?
+  reviewedBy      User?     @relation("ApprovalReviewedBy", fields: [reviewedById], references: [id])
+  reviewedAt      DateTime?
+  rejectionReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // The list a Manager works from is "pending requests of this type",
+  // and a target/requester's own history is looked up almost as often.
+  @@index([type, status])
+  @@index([targetUserId])
+  @@index([requestedById])
 }

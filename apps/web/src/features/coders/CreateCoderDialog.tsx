@@ -8,10 +8,15 @@ import { Button, Input, Modal, Select, useToast } from '@smartcode/ui';
 import { errorMessage } from '@/lib/format';
 import { useCreateCoder } from './use-coders';
 
-/** The new Coder joins the Team Lead's own team automatically - there is no team field. */
-export function CreateCoderDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+/**
+ * The new Coder joins the caller's own scope automatically - there is no
+ * team/vendor field. basePath switches between the Team Lead's own-team
+ * endpoint (default) and the Vendor Portal's own-vendor endpoint; either
+ * way the scope is derived server-side from the session.
+ */
+export function CreateCoderDialog({ open, onClose, basePath }: { open: boolean; onClose: () => void; basePath?: string }) {
   const { showToast } = useToast();
-  const createCoder = useCreateCoder();
+  const createCoder = useCreateCoder(basePath);
   const {
     register,
     handleSubmit,

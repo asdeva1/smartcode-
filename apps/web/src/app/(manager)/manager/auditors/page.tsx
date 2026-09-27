@@ -22,6 +22,8 @@ import { useAuditors, useSetAuditorActive } from '@/features/auditors/use-audito
 import { VendorFilter } from '@/components/data/VendorFilter';
 import { CreateAuditorDialog } from '@/features/auditors/CreateAuditorDialog';
 import { EditAuditorDialog } from '@/features/auditors/EditAuditorDialog';
+import { ResetPasswordDialog, type ResetPasswordTarget } from '@/features/users/ResetPasswordDialog';
+import { ChangeLoginNameDialog, type ChangeLoginNameTarget } from '@/features/users/ChangeLoginNameDialog';
 
 const PAGE_SIZE = 25;
 
@@ -36,6 +38,8 @@ export default function AuditorsPage() {
   const [editTarget, setEditTarget] = React.useState<Auditor | null>(null);
   const [confirmTarget, setConfirmTarget] = React.useState<Auditor | null>(null);
   const [menuAnchor, setMenuAnchor] = React.useState<{ el: HTMLElement; row: Auditor } | null>(null);
+  const [resetTarget, setResetTarget] = React.useState<ResetPasswordTarget | null>(null);
+  const [loginNameTarget, setLoginNameTarget] = React.useState<ChangeLoginNameTarget | null>(null);
 
   const { data, isLoading, isError, refetch, isFetching } = useAuditors({
     page,
@@ -171,6 +175,22 @@ export default function AuditorsPage() {
         >
           View / Edit
         </MenuItem>
+        <MenuItem
+          onClick={() => {
+            if (menuAnchor) setResetTarget({ id: menuAnchor.row.id, label: displayName(menuAnchor.row) });
+            setMenuAnchor(null);
+          }}
+        >
+          Reset Password
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            if (menuAnchor) setLoginNameTarget({ id: menuAnchor.row.id, label: displayName(menuAnchor.row), currentLoginName: menuAnchor.row.loginName });
+            setMenuAnchor(null);
+          }}
+        >
+          Change Login Name
+        </MenuItem>
         {menuAnchor?.row.isActive ? (
           <MenuItem
             onClick={() => {
@@ -194,6 +214,8 @@ export default function AuditorsPage() {
 
       <CreateAuditorDialog open={createOpen} onClose={() => setCreateOpen(false)} />
       <EditAuditorDialog open={!!editTarget} onClose={() => setEditTarget(null)} auditor={editTarget} />
+      <ResetPasswordDialog target={resetTarget} onClose={() => setResetTarget(null)} />
+      <ChangeLoginNameDialog target={loginNameTarget} onClose={() => setLoginNameTarget(null)} onChanged={() => refetch()} />
       <ConfirmDialog
         open={!!confirmTarget}
         title="Deactivate Auditor"

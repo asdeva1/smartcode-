@@ -1,0 +1,17 @@
+-- SmartCode: Vendor -> Team Lead -> Coder hierarchy cascade support.
+--
+-- Forward-only and additive: a single new index on the existing,
+-- already-nullable "User"."vendorId" column. No column is added, no
+-- column, row, constraint or existing index is changed, altered or
+-- removed, so it applies to a populated production database without a
+-- reset. "vendorId" itself already exists (added in
+-- 20260927120000_add_vendors_rework_notifications) and was already a
+-- plain, role-agnostic foreign key to "Vendor" at the database level -
+-- only the Prisma schema's doc comment and the application's write path
+-- restricted it to role VENDOR. This migration adds the index the new
+-- Coder cascade write path (Manager reassigns a vendor's Team Lead ->
+-- look up every active Coder with this vendorId) needs to stay a
+-- fast index scan rather than a sequential scan as data grows.
+--
+-- CreateIndex
+CREATE INDEX "User_vendorId_role_isActive_idx" ON "User"("vendorId", "role", "isActive");

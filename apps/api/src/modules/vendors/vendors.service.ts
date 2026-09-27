@@ -331,6 +331,82 @@ export class VendorsService {
     return { assignmentId: row.id, removedAt };
   }
 
+  /**
+   * Manager assigns (or changes) the vendor's Team Lead -
+   * docs/09-BUSINESS-RULES.md "Vendor -> Team Lead -> Coder Hierarchy".
+   * Wraps the plain assign()/unassign() primitives (unchanged, still used
+   * as-is for Auditors) with the cascade the business rule requires:
+   *
+   *   1. If the vendor already has a different active Team Lead, that
+   *      assignment is replaced (this IS "the Manager changes the
+   *      vendor's Team Lead from TL-01 to TL-02" flow - a single call).
+   *   2. The newly assigned Team Lead is guaranteed to have a Team of
+   *      their own (auto-created if they don't have one yet), since
+   *      Coders need somewhere to point their teamId at.
+   *   3. Every ACTIVE Coder whose vendorId is this vendor - whether
+   *      created from the Vendor Portal or by a previous Team Lead - is
+   *      moved (teamId) onto that Team. Idempotent: running it again
+   *      with the same Team Lead is a no-op update.
+   *
+   * No stale relationship is left behind: coders always end up pointing
+   * at the vendor's CURRENT Team Lead, never the previous one.
+   */
+  async assignTeamLead(caller: AuthUser, vendorId: string, userId: string) {
+    this.assertManager(caller);
+    const previous = await this.prisma.vendorAssignment.findFirst({
+      where: { vendorId, role: 'TEAM_LEAD', isActive: true, userId: { not: userId } },
+      select: { userId: true },
+    });
+    if (previous) {
+      await this.unassign(caller, vendorId, 'TEAM_LEAD', previous.userId);
+    }
+
+    const result = await this.assign(caller, vendorId, 'TEAM_LEAD', userId);
+
+    let teamLead = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, fullName: true, loginName: true, leadsTeam: { select: { id: true } } } });
+    let teamId = teamLead?.leadsTeam?.id;
+    if (!teamId) {
+      const team = await this.prisma.team.create({
+        data: { name: `${teamLead?.fullName ?? teamLead?.loginName ?? 'Team Lead'}'s Team`, teamLeadId: userId },
+      });
+      teamId = team.id;
+      await writeAuditLog(this.prisma, caller, 'TEAM_CREATED', 'Team', team.id, {
+        after: { name: team.name, teamLeadId: userId, reason: 'auto-created for vendor Team Lead assignment' },
+      });
+    }
+
+    const cascaded = await this.prisma.user.updateMany({
+      where: { role: 'CODER', vendorId, isActive: true },
+      data: { teamId },
+    });
+
+    await writeAuditLog(this.prisma, caller, 'VENDOR_TEAM_LEAD_CODERS_CASCADED', 'Vendor', vendorId, {
+      after: { teamLeadId: userId, teamId, codersMoved: cascaded.count },
+    });
+
+    return { ...result, teamId, codersMoved: cascaded.count };
+  }
+
+  /**
+   * Manager removes the vendor's Team Lead with no replacement. Unlike
+   * assignTeamLead(), there is nowhere left for this vendor's Coders to
+   * point, so they are detached (teamId -> null) rather than left
+   * pointing at a Team Lead who no longer represents this vendor - "do
+   * not leave stale Team Lead relationships" applies just as much here.
+   */
+  async removeTeamLead(caller: AuthUser, vendorId: string, userId: string) {
+    this.assertManager(caller);
+    const result = await this.unassign(caller, vendorId, 'TEAM_LEAD', userId);
+    const detached = await this.prisma.user.updateMany({
+      where: { role: 'CODER', vendorId, isActive: true },
+      data: { teamId: null },
+    });
+    await writeAuditLog(this.prisma, caller, 'VENDOR_TEAM_LEAD_CODERS_DETACHED', 'Vendor', vendorId, {
+      after: { removedTeamLeadId: userId, codersDetached: detached.count },
+    });
+    return { ...result, codersDetached: detached.count };
+  }
+
   /** Vendor login account (role VENDOR) - same hierarchy, uniqueness, hashing and audit path as every other account. */
   async createAccount(caller: AuthUser, vendorId: string, dto: CreateVendorAccountDto) {
     this.assertManager(caller);

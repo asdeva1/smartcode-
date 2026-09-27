@@ -9,6 +9,7 @@ import { ListTeamLeadsDto } from './dto/list-team-leads.dto';
 import { CreateAuditorDto } from './dto/create-auditor.dto';
 import { UpdateAuditorDto } from './dto/update-auditor.dto';
 import { ListAuditorsDto } from './dto/list-auditors.dto';
+import { ChangeLoginNameDto } from './dto/change-login-name.dto';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -96,5 +97,22 @@ export class UsersController {
   @ApiOperation({ summary: 'Deactivate a user (Manager: TL/Auditor, TL: own Coders)' })
   deactivate(@CurrentUser() caller: AuthUser, @Param('id') id: string) {
     return this.usersService.setActive(caller, id, false);
+  }
+
+  @Post('users/:id/reset-password')
+  @Roles('MANAGER', 'TEAM_LEAD')
+  @ApiOperation({
+    summary:
+      "Reset a user's password to a one-time temporary password (Manager: Team Lead/Coder/Auditor/Vendor, Team Lead: own-team Coder only)",
+  })
+  resetPassword(@CurrentUser() caller: AuthUser, @Param('id') id: string) {
+    return this.usersService.resetPassword(caller, id);
+  }
+
+  @Patch('users/:id/login-name')
+  @Roles('MANAGER')
+  @ApiOperation({ summary: "Manager changes a user's Login Name directly (Team Lead/Auditor/Vendor/Coder)" })
+  changeLoginName(@CurrentUser() caller: AuthUser, @Param('id') id: string, @Body() dto: ChangeLoginNameDto) {
+    return this.usersService.changeLoginName(caller, id, dto.loginName);
   }
 }

@@ -11,8 +11,9 @@ import { UpdateAuditorDto } from './dto/update-auditor.dto';
 import { ListAuditorsDto } from './dto/list-auditors.dto';
 import { CreateCoderDto } from './dto/create-coder.dto';
 import { requireTeam } from '../../common/scope';
-import { assertProjectAuditorsFit, userVendorId } from '../../common/vendor-scope';
+import { assertProjectAuditorsFit, requireVendor, userVendorId, vendorActiveTeamLeadTeamId } from '../../common/vendor-scope';
 import { writeAuditLog } from '../../common/audit-log';
+import { generateTempPassword } from '../../common/password';
 import { toCoderDto } from './coder.mapper';
 
 /** The user's single active vendor, shown on the Manager's Team Lead / Auditor lists. */
@@ -34,7 +35,7 @@ export class UsersService {
     creator: AuthUser,
     targetRole: Role,
     dto: CreateUserDto,
-    extra: { vendorId?: string } = {},
+    extra: { vendorId?: string; teamId?: string } = {},
   ) {
     if (!canCreateRole(creator.role, targetRole)) {
       await this.prisma.auditLog.create({
@@ -62,8 +63,14 @@ export class UsersService {
     const passwordHash = await LocalAuthProvider.hashPassword(dto.password);
 
     // A Team Lead creating a Coder auto-assigns the Coder to the TL's own
-    // team - see docs/03-RBAC-PERMISSIONS.md.
-    const teamId = targetRole === 'CODER' ? creator.teamId ?? undefined : undefined;
+    // team; a Vendor creating a Coder auto-assigns whatever team its
+    // currently-assigned Team Lead leads (or none yet - see
+    // docs/09-BUSINESS-RULES.md "Vendor -> Team Lead -> Coder Hierarchy").
+    // `extra.teamId` (explicitly, even when undefined) always wins over
+    // the creator's own teamId so a Vendor caller (whose own teamId is
+    // always null) never accidentally inherits one.
+    const teamId =
+      targetRole === 'CODER' ? (extra.teamId !== undefined ? extra.teamId : creator.teamId ?? undefined) : undefined;
 
     const user = await this.prisma.user.create({
       data: {
@@ -75,8 +82,11 @@ export class UsersService {
         role: targetRole,
         createdById: creator.id,
         teamId,
-        // Only Vendor accounts are linked to a vendor directly.
-        ...(targetRole === 'VENDOR' && extra.vendorId ? { vendorId: extra.vendorId } : {}),
+        // Vendor accounts are linked to their own vendor directly; Coder
+        // accounts are linked to whichever vendor created/owns them (see
+        // the vendorId field's doc comment in schema.prisma). No other
+        // role ever carries vendorId.
+        ...(extra.vendorId && (targetRole === 'VENDOR' || targetRole === 'CODER') ? { vendorId: extra.vendorId } : {}),
       },
     });
 
@@ -126,15 +136,38 @@ export class UsersService {
   }
 
   /**
-   * Team Lead creates a Coder on their own team. createWithRole enforces
-   * the hierarchy (only TEAM_LEAD may create CODER), uniqueness, hashing
-   * and audit logging, and assigns the caller's team. confirmPassword is
-   * validated by CreateCoderDto and never persisted.
+   * A Team Lead creates a Coder on their own team, or a Vendor creates a
+   * Coder on their own vendor - docs/09-BUSINESS-RULES.md "Vendor -> Team
+   * Lead -> Coder Hierarchy" / "Coder Creation From Vendor Portal".
+   * createWithRole enforces the hierarchy (only TEAM_LEAD/VENDOR may
+   * create CODER), uniqueness, hashing and audit logging.
+   *
+   * - Team Lead caller: Coder gets the caller's team (existing behaviour)
+   *   and, if the Team Lead is themselves assigned to a vendor, that
+   *   vendor - so the Coder is trackable and correctly cascaded if the
+   *   Manager later reassigns that vendor's Team Lead.
+   * - Vendor caller: Coder gets the caller's vendor (vendorId is derived
+   *   from the session, never trusted from the request body) and, if the
+   *   vendor already has an active Team Lead assigned, that Team Lead's
+   *   team - otherwise no team yet, until one is assigned.
+   *
+   * confirmPassword is validated by CreateCoderDto and never persisted.
    */
   async createCoder(caller: AuthUser, dto: CreateCoderDto) {
-    if (caller.role === 'TEAM_LEAD') requireTeam(caller);
+    let vendorId: string | undefined;
+    let teamId: string | undefined;
+    if (caller.role === 'TEAM_LEAD') {
+      requireTeam(caller);
+      vendorId = (await userVendorId(this.prisma, caller.id)) ?? undefined;
+    } else if (caller.role === 'VENDOR') {
+      vendorId = requireVendor(caller);
+      teamId = await vendorActiveTeamLeadTeamId(this.prisma, vendorId);
+    } else {
+      throw new ForbiddenException('Only a Team Lead or a Vendor can create a Coder');
+    }
+
     const { confirmPassword: _confirm, isActive, ...userDto } = dto;
-    let user = await this.createWithRole(caller, 'CODER', userDto);
+    let user = await this.createWithRole(caller, 'CODER', userDto, { vendorId, teamId });
     if (isActive === false) {
       const updated = await this.prisma.user.update({ where: { id: user.id }, data: { isActive: false } });
       await writeAuditLog(this.prisma, caller, 'USER_DEACTIVATED', 'User', user.id, {
@@ -171,7 +204,12 @@ export class UsersService {
       (caller.role === 'TEAM_LEAD' &&
         target.role === 'CODER' &&
         caller.teamId !== null &&
-        target.teamId === caller.teamId);
+        target.teamId === caller.teamId) ||
+      // Same null-guard for a Vendor without an active vendor.
+      (caller.role === 'VENDOR' &&
+        target.role === 'CODER' &&
+        caller.vendorId !== null &&
+        target.vendorId === caller.vendorId);
 
     if (!allowed) {
       throw new ForbiddenException('You are not permitted to change this user\'s status');
@@ -197,6 +235,77 @@ export class UsersService {
 
     const { passwordHash: _omit, ...safeUser } = updated;
     return safeUser;
+  }
+
+  /**
+   * Password reset (docs/09-BUSINESS-RULES.md sections 6/7/11):
+   *   - Manager resets Team Lead / Coder / Auditor / Vendor passwords
+   *     (never another Manager's).
+   *   - Team Lead resets a Coder's password, only within their own team.
+   * Generates a one-time random password (never a client-supplied value -
+   * this is a reset, not a "set password" form), hashes it with the same
+   * Argon2 path every account uses, and stamps passwordChangedAt so every
+   * session/refresh token issued before this moment stops working (the
+   * same invalidation mechanism AuthService.changePassword uses for a
+   * Manager's own password). The plaintext is returned to the caller
+   * exactly once, in this response, to hand to the account's owner out of
+   * band - it is never written to the AuditLog or any other log.
+   */
+  async resetPassword(caller: AuthUser, targetId: string): Promise<{ id: string; loginName: string; temporaryPassword: string }> {
+    const target = await this.prisma.user.findUnique({ where: { id: targetId } });
+    if (!target) throw new NotFoundException('User not found');
+
+    const allowed =
+      (caller.role === 'MANAGER' && target.role !== 'MANAGER') ||
+      (caller.role === 'TEAM_LEAD' && target.role === 'CODER' && caller.teamId !== null && target.teamId === caller.teamId);
+
+    if (!allowed) {
+      throw new ForbiddenException("You are not permitted to reset this user's password");
+    }
+
+    const temporaryPassword = generateTempPassword();
+    const passwordHash = await LocalAuthProvider.hashPassword(temporaryPassword);
+    const changedAt = new Date();
+    await this.prisma.user.update({
+      where: { id: targetId },
+      data: { passwordHash, passwordChangedAt: changedAt, failedLoginCount: 0, lockedUntil: null },
+    });
+    // Never include the password (or its hash) in the audit log - only that a reset happened.
+    await writeAuditLog(this.prisma, caller, 'PASSWORD_RESET', 'User', targetId, {
+      after: { targetRole: target.role, sessionsInvalidatedBefore: changedAt.toISOString() },
+    });
+
+    return { id: targetId, loginName: target.loginName, temporaryPassword };
+  }
+
+  /**
+   * Login Name change (docs/09-BUSINESS-RULES.md section 8/9). Manager
+   * changes it directly; a Team Lead may only REQUEST a change for their
+   * own-team Coder (see ApprovalsService for the request/approve path).
+   * Preserves the User row (id, history, ProductionEntry/AuditEntry
+   * ownership) - only the loginName column changes.
+   */
+  async changeLoginName(caller: AuthUser, targetId: string, newLoginName: string) {
+    if (caller.role !== 'MANAGER') {
+      throw new ForbiddenException('Only a Manager can change a Login Name directly');
+    }
+    const target = await this.prisma.user.findUnique({ where: { id: targetId } });
+    if (!target) throw new NotFoundException('User not found');
+    if (target.role === 'MANAGER' && target.id !== caller.id) {
+      throw new ForbiddenException('Cannot change another Manager\'s Login Name');
+    }
+    const loginName = newLoginName.trim();
+    if (loginName === target.loginName) return { id: targetId, loginName };
+
+    const conflict = await this.prisma.user.findFirst({ where: { loginName, id: { not: targetId } } });
+    if (conflict) throw new ConflictException('This Login Name is already taken');
+
+    const updated = await this.prisma.user.update({ where: { id: targetId }, data: { loginName } });
+    await writeAuditLog(this.prisma, caller, 'LOGIN_NAME_CHANGED', 'User', targetId, {
+      before: { loginName: target.loginName },
+      after: { loginName: updated.loginName },
+    });
+    return { id: targetId, loginName: updated.loginName };
   }
 
   /**

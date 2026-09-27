@@ -8,12 +8,14 @@ import type { VendorDetail as VendorDetailDto, VendorMember, VendorPerson } from
 import { Breadcrumb, Button, ConfirmDialog, DataTable, ErrorState, LoadingState, PageHeader, Pagination, Tabs, useToast } from '@smartcode/ui';
 import { errorMessage, formatDate, formatDateTime, personName } from '@/lib/format';
 import { ReworkTable } from '@/features/rework/ReworkTable';
-import { useRemoveMember, useSetAccountActive, useSetVendorActive, useVendor, useVendorActivity } from './use-vendors';
+import { useInvalidateVendors, useRemoveMember, useSetAccountActive, useSetVendorActive, useVendor, useVendorActivity } from './use-vendors';
 import { VendorMetrics } from './VendorMetrics';
 import { VendorStructureView } from './VendorStructureView';
 import { VendorFormDialog } from './VendorFormDialog';
 import { AssignMemberDialog } from './AssignMemberDialog';
 import { CreateVendorAccountDialog } from './CreateVendorAccountDialog';
+import { ResetPasswordDialog, type ResetPasswordTarget } from '@/features/users/ResetPasswordDialog';
+import { ChangeLoginNameDialog, type ChangeLoginNameTarget } from '@/features/users/ChangeLoginNameDialog';
 
 type Tab = 'overview' | 'structure' | 'team-leads' | 'auditors' | 'accounts' | 'activity';
 const statusChip = (isActive: boolean) => (
@@ -167,7 +169,10 @@ function MembersTab({ vendor, role }: { vendor: VendorDetailDto; role: 'TEAM_LEA
 function AccountsTab({ vendor }: { vendor: VendorDetailDto }) {
   const { showToast } = useToast();
   const setActive = useSetAccountActive();
+  const invalidate = useInvalidateVendors();
   const [creating, setCreating] = React.useState(false);
+  const [resetTarget, setResetTarget] = React.useState<ResetPasswordTarget | null>(null);
+  const [loginNameTarget, setLoginNameTarget] = React.useState<ChangeLoginNameTarget | null>(null);
   const toggle = (a: VendorPerson) =>
     setActive.mutate(
       { id: a.id, isActive: !a.isActive },
@@ -199,14 +204,28 @@ function AccountsTab({ vendor }: { vendor: VendorDetailDto }) {
             header: '',
             align: 'right',
             render: (a) => (
-              <Button size="small" variant="text" onClick={() => toggle(a)}>
-                {a.isActive ? 'Deactivate' : 'Activate'}
-              </Button>
+              <Stack direction="row" spacing={1} justifyContent="flex-end">
+                <Button size="small" variant="text" onClick={() => setResetTarget({ id: a.id, label: personName(a) })}>
+                  Reset Password
+                </Button>
+                <Button
+                  size="small"
+                  variant="text"
+                  onClick={() => setLoginNameTarget({ id: a.id, label: personName(a), currentLoginName: a.loginName })}
+                >
+                  Change Login Name
+                </Button>
+                <Button size="small" variant="text" onClick={() => toggle(a)}>
+                  {a.isActive ? 'Deactivate' : 'Activate'}
+                </Button>
+              </Stack>
             ),
           },
         ]}
       />
       {creating && <CreateVendorAccountDialog vendorId={vendor.id} vendorName={vendor.name} onClose={() => setCreating(false)} />}
+      <ResetPasswordDialog target={resetTarget} onClose={() => setResetTarget(null)} />
+      <ChangeLoginNameDialog target={loginNameTarget} onClose={() => setLoginNameTarget(null)} onChanged={() => invalidate()} />
     </>
   );
 }

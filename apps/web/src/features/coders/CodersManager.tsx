@@ -15,16 +15,36 @@ import { useCoders, useInvalidateCodersAfterImport, useSetCoderActive } from './
 import { CreateCoderDialog } from './CreateCoderDialog';
 import { EditCoderDialog } from './EditCoderDialog';
 import { CoderDetailDrawer } from './CoderDetailDrawer';
+import { ResetPasswordDialog, type ResetPasswordTarget } from '@/features/users/ResetPasswordDialog';
+import { RequestLoginNameChangeDialog, type LoginNameChangeTarget } from './RequestLoginNameChangeDialog';
 
 const PAGE_SIZE = 25;
 const name = (c: Coder) => c.fullName ?? c.loginName;
 
 /**
- * Team roster + Coder account management for a Team Lead: search, status
- * filter, pagination, refresh, view, create, edit, activate/deactivate,
- * CSV import (with preview) and PDF / Excel / CSV export.
+ * Coder account management, scoped to the caller's own team (Team Lead)
+ * or own vendor (Vendor Portal - basePath="/vendor/coders"): search,
+ * status filter, pagination, refresh, view, create, edit,
+ * activate/deactivate. CSV import and export are Team-Lead-only for now
+ * (showImportExport=false hides both on the Vendor Portal screen).
+ * Password reset (docs/09-BUSINESS-RULES.md section 7) and requesting a
+ * Login Name change (section 9) are likewise Team-Lead-only - a Vendor is
+ * not authorized to reset a Coder's password or request their Login Name
+ * change, so the Vendor Portal screen passes both flags false.
  */
-export function CodersManager({ headerActions }: { headerActions?: (actions: React.ReactNode) => React.ReactNode }) {
+export function CodersManager({
+  headerActions,
+  basePath = '/team-leads/coders',
+  showImportExport = true,
+  allowResetPassword = true,
+  allowLoginNameRequest = true,
+}: {
+  headerActions?: (actions: React.ReactNode) => React.ReactNode;
+  basePath?: string;
+  showImportExport?: boolean;
+  allowResetPassword?: boolean;
+  allowLoginNameRequest?: boolean;
+}) {
   const { showToast } = useToast();
   const [page, setPage] = React.useState(1);
   const [search, setSearch] = React.useState('');
@@ -35,9 +55,11 @@ export function CodersManager({ headerActions }: { headerActions?: (actions: Rea
   const [viewId, setViewId] = React.useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = React.useState<Coder | null>(null);
   const [menu, setMenu] = React.useState<{ el: HTMLElement; row: Coder } | null>(null);
+  const [resetTarget, setResetTarget] = React.useState<ResetPasswordTarget | null>(null);
+  const [loginNameTarget, setLoginNameTarget] = React.useState<LoginNameChangeTarget | null>(null);
 
   const filters = { search: search || undefined, status };
-  const { data, isLoading, isError, refetch, isFetching } = useCoders({ page, pageSize: PAGE_SIZE, ...filters });
+  const { data, isLoading, isError, refetch, isFetching } = useCoders({ page, pageSize: PAGE_SIZE, ...filters }, basePath);
   const setActive = useSetCoderActive();
   const invalidate = useInvalidateCodersAfterImport();
 
@@ -52,10 +74,14 @@ export function CodersManager({ headerActions }: { headerActions?: (actions: Rea
 
   const actions = (
     <Stack direction="row" spacing={1}>
-      <Button variant="outlined" startIcon={<Upload size={16} />} onClick={() => setImportOpen(true)}>
-        Import CSV
-      </Button>
-      <ExportMenu path="/team-leads/coders/export" params={filters} />
+      {showImportExport && (
+        <>
+          <Button variant="outlined" startIcon={<Upload size={16} />} onClick={() => setImportOpen(true)}>
+            Import CSV
+          </Button>
+          <ExportMenu path={`${basePath}/export`} params={filters} />
+        </>
+      )}
       <Button startIcon={<Plus size={16} />} onClick={() => setCreateOpen(true)}>
         Create Coder
       </Button>
@@ -111,6 +137,7 @@ export function CodersManager({ headerActions }: { headerActions?: (actions: Rea
               { key: 'fullName', header: 'Full Name', render: (r) => r.fullName ?? '—' },
               { key: 'loginName', header: 'Login Name', render: (r) => r.loginName },
               { key: 'email', header: 'Email', render: (r) => r.email },
+              { key: 'teamLead', header: 'Team Lead', render: (r) => (r.teamLead ? r.teamLead.fullName ?? r.teamLead.loginName : '—') },
               {
                 key: 'status',
                 header: 'Status',
@@ -157,6 +184,26 @@ export function CodersManager({ headerActions }: { headerActions?: (actions: Rea
         >
           Edit
         </MenuItem>
+        {allowResetPassword && (
+          <MenuItem
+            onClick={() => {
+              if (menu) setResetTarget({ id: menu.row.id, label: name(menu.row) });
+              setMenu(null);
+            }}
+          >
+            Reset Password
+          </MenuItem>
+        )}
+        {allowLoginNameRequest && (
+          <MenuItem
+            onClick={() => {
+              if (menu) setLoginNameTarget({ id: menu.row.id, label: name(menu.row), currentLoginName: menu.row.loginName });
+              setMenu(null);
+            }}
+          >
+            Request Login Name Change
+          </MenuItem>
+        )}
         {menu?.row.isActive ? (
           <MenuItem
             onClick={() => {
@@ -178,20 +225,24 @@ export function CodersManager({ headerActions }: { headerActions?: (actions: Rea
         )}
       </Menu>
 
-      <CreateCoderDialog open={createOpen} onClose={() => setCreateOpen(false)} />
-      <EditCoderDialog open={!!editTarget} onClose={() => setEditTarget(null)} coder={editTarget} />
-      <CoderDetailDrawer coderId={viewId} onClose={() => setViewId(null)} />
-      <CsvImportDialog
-        open={importOpen}
-        onClose={() => setImportOpen(false)}
-        title="Import Coders"
-        previewPath="/team-leads/coders/import/preview"
-        commitPath="/team-leads/coders/import"
-        headers={CODER_IMPORT_HEADERS}
-        columns={['employeeId', 'fullName', 'loginName', 'email', 'status']}
-        templateRow={['EMP1001', 'Jane Coder', 'jane.coder', 'jane.coder@example.com', 'ChangeMe123!', 'ChangeMe123!', 'Active']}
-        onImported={() => invalidate()}
-      />
+      <CreateCoderDialog open={createOpen} onClose={() => setCreateOpen(false)} basePath={basePath} />
+      <EditCoderDialog open={!!editTarget} onClose={() => setEditTarget(null)} coder={editTarget} basePath={basePath} />
+      <CoderDetailDrawer coderId={viewId} onClose={() => setViewId(null)} basePath={basePath} />
+      {allowResetPassword && <ResetPasswordDialog target={resetTarget} onClose={() => setResetTarget(null)} />}
+      {allowLoginNameRequest && <RequestLoginNameChangeDialog target={loginNameTarget} onClose={() => setLoginNameTarget(null)} />}
+      {showImportExport && (
+        <CsvImportDialog
+          open={importOpen}
+          onClose={() => setImportOpen(false)}
+          title="Import Coders"
+          previewPath={`${basePath}/import/preview`}
+          commitPath={`${basePath}/import`}
+          headers={CODER_IMPORT_HEADERS}
+          columns={['employeeId', 'fullName', 'loginName', 'email', 'status']}
+          templateRow={['EMP1001', 'Jane Coder', 'jane.coder', 'jane.coder@example.com', 'ChangeMe123!', 'ChangeMe123!', 'Active']}
+          onImported={() => invalidate()}
+        />
+      )}
       <ConfirmDialog
         open={!!confirmTarget}
         title="Deactivate Coder"

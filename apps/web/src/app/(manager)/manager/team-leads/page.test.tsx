@@ -148,6 +148,71 @@ describe('TeamLeadsPage', () => {
     expect(await screen.findByText('New Lead')).toBeInTheDocument();
   });
 
+  it('resets a Team Lead\'s password: confirm, then a one-time display of the temporary password', async () => {
+    mockApi({
+      teamLeads: { data: [sampleTeamLead], total: 1, page: 1, pageSize: 25 },
+      teams: [],
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('Jane Doe');
+    await user.click(screen.getByRole('button', { name: '' })); // row action menu icon button
+    await user.click(await screen.findByText('Reset Password'));
+    expect(await screen.findByText(/Generate a new one-time password for Jane Doe/)).toBeInTheDocument();
+
+    mockedApiFetch.mockImplementation((path: string, options?: RequestInit) => {
+      if (path === '/users/tl-1/reset-password' && options?.method === 'POST') {
+        return Promise.resolve({ id: 'tl-1', loginName: 'jane.doe', temporaryPassword: 'Tmp9!xYzAbc' });
+      }
+      return Promise.reject(new Error(`Unhandled path in test: ${path}`));
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Reset Password' }));
+    expect(await screen.findByText('Password reset')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Tmp9!xYzAbc')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(screen.queryByText('Password reset')).not.toBeInTheDocument());
+  });
+
+  it('changes a Team Lead\'s Login Name directly (Manager-only, no approval needed)', async () => {
+    mockApi({
+      teamLeads: { data: [sampleTeamLead], total: 1, page: 1, pageSize: 25 },
+      teams: [],
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('Jane Doe');
+    await user.click(screen.getByRole('button', { name: '' }));
+    await user.click(await screen.findByText('Change Login Name'));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('Login Name')).toHaveValue('jane.doe');
+
+    mockedApiFetch.mockImplementation((path: string, options?: RequestInit) => {
+      if (path === '/users/tl-1/login-name' && options?.method === 'PATCH') {
+        return Promise.resolve({ id: 'tl-1', loginName: 'jane.renamed' });
+      }
+      if (path.startsWith('/manager/team-leads')) {
+        return Promise.resolve({ data: [{ ...sampleTeamLead, loginName: 'jane.renamed' }], total: 1, page: 1, pageSize: 25 });
+      }
+      return Promise.resolve([]);
+    });
+
+    await user.clear(within(dialog).getByLabelText('Login Name'));
+    await user.type(within(dialog).getByLabelText('Login Name'), 'jane.renamed');
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalledWith('/users/tl-1/login-name', expect.objectContaining({ method: 'PATCH' }));
+    });
+    expect(JSON.parse(String(mockedApiFetch.mock.calls.find(([p]) => p === '/users/tl-1/login-name')?.[1]?.body))).toEqual({
+      loginName: 'jane.renamed',
+    });
+    expect(await screen.findByText('Login Name changed to jane.renamed.')).toBeInTheDocument();
+  });
+
   it('asks for confirmation before deactivating, and only calls the API after confirming', async () => {
     mockApi({
       teamLeads: { data: [sampleTeamLead], total: 1, page: 1, pageSize: 25 },

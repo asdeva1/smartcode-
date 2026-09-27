@@ -16,6 +16,7 @@ import { HealthModule } from './modules/health/health.module';
 import { VendorsModule } from './modules/vendors/vendors.module';
 import { ReworkModule } from './modules/rework/rework.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { ApprovalsModule } from './modules/approvals/approvals.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { envValidationSchema } from './config/env.validation';
 
@@ -44,6 +45,7 @@ import { envValidationSchema } from './config/env.validation';
     VendorsModule,
     ReworkModule,
     NotificationsModule,
+    ApprovalsModule,
     HealthModule,
   ],
   providers: [

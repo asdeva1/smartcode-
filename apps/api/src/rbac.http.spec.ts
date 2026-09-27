@@ -88,11 +88,17 @@ const ROUTES: { method: Method; path: string; allowed: Role[] }[] = [
   { method: 'get', path: '/api/manager/auditors', allowed: ['MANAGER'] },
   { method: 'patch', path: `/api/manager/auditors/${ID}`, allowed: ['MANAGER'] },
   { method: 'patch', path: `/api/users/${ID}/deactivate`, allowed: ['MANAGER', 'TEAM_LEAD'] },
+  { method: 'post', path: `/api/users/${ID}/reset-password`, allowed: ['MANAGER', 'TEAM_LEAD'] },
+  { method: 'patch', path: `/api/users/${ID}/login-name`, allowed: ['MANAGER'] },
   { method: 'post', path: '/api/team-leads/coders', allowed: ['TEAM_LEAD'] },
   { method: 'get', path: '/api/team-leads/coders', allowed: ['TEAM_LEAD'] },
   { method: 'get', path: '/api/team-leads/coders/export?format=csv', allowed: ['TEAM_LEAD'] },
   { method: 'post', path: '/api/team-leads/coders/import/preview', allowed: ['TEAM_LEAD'] },
   { method: 'patch', path: `/api/team-leads/coders/${ID}`, allowed: ['TEAM_LEAD'] },
+  { method: 'post', path: `/api/team-leads/coders/${ID}/login-name-request`, allowed: ['TEAM_LEAD'] },
+  { method: 'get', path: '/api/manager/approvals', allowed: ['MANAGER'] },
+  { method: 'patch', path: `/api/manager/approvals/${ID}/approve`, allowed: ['MANAGER'] },
+  { method: 'patch', path: `/api/manager/approvals/${ID}/reject`, allowed: ['MANAGER'] },
   { method: 'get', path: '/api/manager/projects', allowed: ['MANAGER'] },
   { method: 'post', path: '/api/manager/auditor-assignments', allowed: ['MANAGER'] },
   { method: 'get', path: '/api/projects/mine', allowed: ALL },
@@ -136,6 +142,13 @@ const ROUTES: { method: Method; path: string; allowed: Role[] }[] = [
   { method: 'get', path: '/api/vendor/me', allowed: ['VENDOR'] },
   { method: 'get', path: '/api/vendor/structure', allowed: ['VENDOR'] },
   { method: 'get', path: '/api/vendor/dashboard', allowed: ['VENDOR'] },
+  // Vendor Portal Coder management - Vendor only
+  { method: 'get', path: '/api/vendor/coders', allowed: ['VENDOR'] },
+  { method: 'post', path: '/api/vendor/coders', allowed: ['VENDOR'] },
+  { method: 'get', path: `/api/vendor/coders/${ID}`, allowed: ['VENDOR'] },
+  { method: 'patch', path: `/api/vendor/coders/${ID}`, allowed: ['VENDOR'] },
+  { method: 'patch', path: `/api/vendor/coders/${ID}/activate`, allowed: ['VENDOR'] },
+  { method: 'patch', path: `/api/vendor/coders/${ID}/deactivate`, allowed: ['VENDOR'] },
   // Rework + notifications - row-scoped in the services
   { method: 'get', path: '/api/rework', allowed: ALL },
   { method: 'get', path: '/api/rework/summary', allowed: ALL },
@@ -207,6 +220,19 @@ describe('HTTP behaviour of the new endpoints', () => {
     await request(app.getHttpServer()).get('/api/team-leads/coders').set('Authorization', as('TEAM_LEAD')).expect(200);
     const where = prisma.user.findMany.mock.calls.at(-1)[0].where;
     expect(where).toMatchObject({ role: 'CODER', teamId: TEAM_ID });
+  });
+
+  it("scopes the Vendor Portal's Coder list to the caller's own vendor, never a client-supplied one", async () => {
+    await request(app.getHttpServer()).get('/api/vendor/coders').set('Authorization', as('VENDOR')).expect(200);
+    const where = prisma.user.findMany.mock.calls.at(-1)[0].where;
+    expect(where).toMatchObject({ role: 'CODER', vendorId: VENDOR_ID });
+    // vendorId is never accepted as a request field - it is derived from the session only.
+    const res = await request(app.getHttpServer())
+      .post('/api/vendor/coders')
+      .set('Authorization', as('VENDOR'))
+      .send({ employeeId: 'E1', fullName: 'X', loginName: 'x', email: 'x@x.local', password: 'Password1!', confirmPassword: 'Password1!', vendorId: ID });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toContain('property vendorId should not exist');
   });
 
   it('streams exports as attachments with a dated filename', async () => {

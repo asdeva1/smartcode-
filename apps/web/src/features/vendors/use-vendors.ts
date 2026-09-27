@@ -89,7 +89,7 @@ export function useAssignable(vendorId: string, role: 'TEAM_LEAD' | 'AUDITOR', e
   });
 }
 
-function useInvalidateVendors() {
+export function useInvalidateVendors() {
   const qc = useQueryClient();
   return () => {
     for (const key of ['vendors', 'team-leads', 'auditors', 'dashboard']) qc.invalidateQueries({ queryKey: [key] });

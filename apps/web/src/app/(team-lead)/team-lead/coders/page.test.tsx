@@ -40,7 +40,7 @@ describe('Team Lead - Coders page', () => {
     expect(screen.getByText('EMP100')).toBeInTheDocument();
     expect(screen.getByText('Inactive')).toBeInTheDocument();
     expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual([
-      'Employee ID', 'Full Name', 'Login Name', 'Email', 'Status', 'Created Date', 'Actions',
+      'Employee ID', 'Full Name', 'Login Name', 'Email', 'Team Lead', 'Status', 'Created Date', 'Actions',
     ]);
     expectNoProhibitedField();
   });
@@ -130,6 +130,56 @@ describe('Team Lead - Coders page', () => {
     });
   });
 
+  it('resets a Coder\'s password: confirm, then a one-time display of the temporary password', async () => {
+    routeApi(fetchMock, {
+      'GET /team-leads/coders?': page([coder]),
+      'POST /users/c-1/reset-password': { id: 'c-1', loginName: 'cody', temporaryPassword: 'Tmp9!xYzAbc' },
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<CodersPage />);
+    await user.click(await screen.findByRole('button', { name: 'Actions for Cody Coder' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Reset Password' }));
+    expect(await screen.findByText(/Generate a new one-time password for Cody Coder/)).toBeInTheDocument();
+    expect(callsTo(fetchMock, '/users/c-1/reset-password', 'POST')).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'Reset Password' }));
+    await waitFor(() => expect(callsTo(fetchMock, '/users/c-1/reset-password', 'POST')).toHaveLength(1));
+    expect(await screen.findByText('Password reset')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Tmp9!xYzAbc')).toBeInTheDocument();
+    expect(screen.getByText(/shown only once/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(screen.queryByText('Password reset')).not.toBeInTheDocument());
+  });
+
+  it('requests a Coder Login Name change - filed as pending, never applied directly', async () => {
+    routeApi(fetchMock, {
+      'GET /team-leads/coders?': page([coder]),
+      'POST /team-leads/coders/c-1/login-name-request': {
+        id: 'req-1', type: 'LOGIN_NAME_CHANGE', status: 'PENDING',
+        targetUser: { id: 'c-1', fullName: 'Cody Coder', employeeId: 'EMP100', loginName: 'cody' },
+        requestedBy: { id: 'tl-1', fullName: 'Tara Lead', employeeId: 'EMP002', loginName: 'tl.one' },
+        requestedAt: '2026-09-27T00:00:00.000Z',
+        payload: { currentLoginName: 'cody', requestedLoginName: 'cody.new' },
+        reviewedBy: null, reviewedAt: null, rejectionReason: null,
+      },
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<CodersPage />);
+    await user.click(await screen.findByRole('button', { name: 'Actions for Cody Coder' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Request Login Name Change' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('Current Login Name')).toHaveValue('cody');
+
+    await user.type(within(dialog).getByLabelText('Requested Login Name'), 'cody.new');
+    await user.click(within(dialog).getByRole('button', { name: 'Submit for Approval' }));
+    await waitFor(() => expect(callsTo(fetchMock, '/team-leads/coders/c-1/login-name-request', 'POST')).toHaveLength(1));
+    expect(JSON.parse(callsTo(fetchMock, '/team-leads/coders/c-1/login-name-request', 'POST')[0][1].body)).toEqual({ loginName: 'cody.new' });
+    expect(await screen.findByText(/awaiting Manager approval/)).toBeInTheDocument();
+    // The list is never patched directly by this flow - only a request was filed.
+    expect(callsTo(fetchMock, '/team-leads/coders/c-1', 'PATCH')).toHaveLength(0);
+  });
+
   it('deactivates only after confirmation, and activates directly', async () => {
     routeApi(fetchMock, {
       'GET /team-leads/coders?': page([coder, inactive]),
@@ -151,10 +201,14 @@ describe('Team Lead - Coders page', () => {
     await waitFor(() => expect(callsTo(fetchMock, '/users/c-2/activate', 'PATCH')).toHaveLength(1));
   });
 
-  it('views a Coder with production stats', async () => {
+  it('views a Coder with production stats and Vendor', async () => {
     routeApi(fetchMock, {
       'GET /team-leads/coders?': page([coder]),
-      'GET /team-leads/coders/c-1': { ...coder, stats: { charts: 7, completed: 5, inProgress: 1, rework: 1, pages: 90, dos: 12, icds: 44 } },
+      'GET /team-leads/coders/c-1': {
+        ...coder,
+        vendor: { id: 'v-1', name: 'Vendor Alpha' },
+        stats: { charts: 7, completed: 5, inProgress: 1, rework: 1, pages: 90, dos: 12, icds: 44 },
+      },
     });
     const user = userEvent.setup();
     renderWithProviders(<CodersPage />);
@@ -163,6 +217,7 @@ describe('Team Lead - Coders page', () => {
     expect(await screen.findByText('Coder details')).toBeInTheDocument();
     expect(await screen.findByText('90')).toBeInTheDocument();
     expect(screen.getByText('44')).toBeInTheDocument();
+    expect(screen.getByText('Vendor Alpha')).toBeInTheDocument();
   });
 
   it('exports PDF, Excel and CSV through the backend with the current filters', async () => {

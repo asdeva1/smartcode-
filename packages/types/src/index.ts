@@ -14,3 +14,4 @@ export * from './schemas/report';
 export * from './schemas/vendor';
 export * from './schemas/rework';
 export * from './schemas/notification';
+export * from './schemas/approval';

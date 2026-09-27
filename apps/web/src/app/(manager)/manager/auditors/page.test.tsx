@@ -296,6 +296,51 @@ describe('AuditorsPage', () => {
     expect(await screen.findByText('Auditor updated.')).toBeInTheDocument();
   });
 
+  it('resets an Auditor\'s password: confirm, then a one-time display of the temporary password', async () => {
+    mockApi(listOf([sampleAuditor]), {
+      'POST /users/aud-1/reset-password': () =>
+        Promise.resolve({ id: 'aud-1', loginName: 'alex.auditor', temporaryPassword: 'Tmp9!xYzAbc' }),
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await openRowMenu(user);
+    await user.click(await screen.findByRole('menuitem', { name: 'Reset Password' }));
+    expect(await screen.findByText(/Generate a new one-time password for Alex Auditor/)).toBeInTheDocument();
+    expect(mockedApiFetch).not.toHaveBeenCalledWith('/users/aud-1/reset-password', expect.anything());
+
+    await user.click(screen.getByRole('button', { name: 'Reset Password' }));
+    expect(await screen.findByText('Password reset')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Tmp9!xYzAbc')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(screen.queryByText('Password reset')).not.toBeInTheDocument());
+  });
+
+  it('changes an Auditor\'s Login Name directly', async () => {
+    mockApi(listOf([sampleAuditor]), {
+      'PATCH /users/aud-1/login-name': () => Promise.resolve({ id: 'aud-1', loginName: 'alex.renamed' }),
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await openRowMenu(user);
+    await user.click(await screen.findByRole('menuitem', { name: 'Change Login Name' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('Login Name')).toHaveValue('alex.auditor');
+
+    await user.clear(within(dialog).getByLabelText('Login Name'));
+    await user.type(within(dialog).getByLabelText('Login Name'), 'alex.renamed');
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalledWith('/users/aud-1/login-name', expect.objectContaining({ method: 'PATCH' }));
+    });
+    const call = mockedApiFetch.mock.calls.find(([p, o]) => p === '/users/aud-1/login-name' && o?.method === 'PATCH');
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ loginName: 'alex.renamed' });
+    expect(await screen.findByText('Login Name changed to alex.renamed.')).toBeInTheDocument();
+  });
+
   it('asks for confirmation before deactivating, and only calls the API after confirming', async () => {
     mockApi(listOf([sampleAuditor]), {
       'PATCH /users/aud-1/deactivate': () => Promise.resolve({ ...sampleAuditor, isActive: false }),

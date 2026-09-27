@@ -10,19 +10,22 @@ export interface CoderListParams {
   status: 'all' | 'active' | 'inactive';
 }
 
-/** Team Lead's own-team Coders. The backend scopes to the caller's team from the session. */
-export function useCoders(params: CoderListParams) {
+/** Default base path (Team Lead). The Vendor Portal reuses every hook here with basePath="/vendor/coders" - both are scoped server-side from the caller's session, never a client-supplied team/vendor id. */
+const DEFAULT_BASE = '/team-leads/coders';
+
+/** Own-scope Coders (own team for a Team Lead, own vendor for a Vendor). The backend derives the scope from the session. */
+export function useCoders(params: CoderListParams, basePath: string = DEFAULT_BASE) {
   return useQuery({
-    queryKey: ['coders', 'team', params],
-    queryFn: () => apiFetch<CoderListResponse>(`/team-leads/coders?${toQuery({ ...params })}`),
+    queryKey: ['coders', basePath, params],
+    queryFn: () => apiFetch<CoderListResponse>(`${basePath}?${toQuery({ ...params })}`),
     placeholderData: (prev) => prev,
   });
 }
 
-export function useCoder(id: string | null) {
+export function useCoder(id: string | null, basePath: string = DEFAULT_BASE) {
   return useQuery({
-    queryKey: ['coders', 'detail', id],
-    queryFn: () => apiFetch<CoderDetail>(`/team-leads/coders/${id}`),
+    queryKey: ['coders', basePath, 'detail', id],
+    queryFn: () => apiFetch<CoderDetail>(`${basePath}/${id}`),
     enabled: !!id,
   });
 }
@@ -35,20 +38,20 @@ function useInvalidateCoders() {
   };
 }
 
-export function useCreateCoder() {
+export function useCreateCoder(basePath: string = DEFAULT_BASE) {
   const invalidate = useInvalidateCoders();
   return useMutation({
     mutationFn: (input: CreateCoderInput) =>
-      apiFetch<Coder>('/team-leads/coders', { method: 'POST', body: JSON.stringify(input) }),
+      apiFetch<Coder>(basePath, { method: 'POST', body: JSON.stringify(input) }),
     onSuccess: () => invalidate(),
   });
 }
 
-export function useUpdateCoder() {
+export function useUpdateCoder(basePath: string = DEFAULT_BASE) {
   const invalidate = useInvalidateCoders();
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: UpdateCoderInput }) =>
-      apiFetch<Coder>(`/team-leads/coders/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+      apiFetch<Coder>(`${basePath}/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
     onSuccess: () => invalidate(),
   });
 }

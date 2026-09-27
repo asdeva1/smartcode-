@@ -1,3 +1,10 @@
+interface CoderTeam {
+  id: string;
+  name: string;
+  teamLead: { id: string; fullName: string | null; employeeId: string; loginName: string } | null;
+  projects?: { id: string; name: string }[];
+}
+
 /** Only the fields the Coder screens need - never passwordHash or login-security counters. */
 export function toCoderDto(user: {
   id: string;
@@ -9,6 +16,9 @@ export function toCoderDto(user: {
   isActive: boolean;
   createdAt: Date;
   lastLoginAt?: Date | null;
+  vendorId?: string | null;
+  team?: CoderTeam | null;
+  vendor?: { id: string; name: string } | null;
 }) {
   return {
     id: user.id,
@@ -20,5 +30,15 @@ export function toCoderDto(user: {
     isActive: user.isActive,
     createdAt: user.createdAt,
     lastLoginAt: user.lastLoginAt ?? null,
+    vendorId: user.vendorId ?? null,
+    // Section 10 requirement: the Coder profile shows its Vendor by name,
+    // not just the raw id.
+    vendor: user.vendor ?? null,
+    // Section 2/3 requirement: "View assigned Team Lead" / "View assigned
+    // Project(s)" - both are derived (never copied) through the Coder's
+    // current team, which the Vendor -> Team Lead cascade keeps current.
+    team: user.team ? { id: user.team.id, name: user.team.name } : null,
+    teamLead: user.team?.teamLead ?? null,
+    projects: user.team?.projects ?? [],
   };
 }

@@ -43,6 +43,7 @@ describe('CodersService (Team Lead coder management)', () => {
       },
       productionEntry: { findMany: jest.fn().mockResolvedValue([]) },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
+      vendorAssignment: { findFirst: jest.fn().mockResolvedValue(null) },
       $transaction: jest.fn(async (fn: any) => fn(tx)),
     };
     const moduleRef = await Test.createTestingModule({
@@ -78,7 +79,7 @@ describe('CodersService (Team Lead coder management)', () => {
     it('returns 404 for a Coder on another team (no cross-team probing)', async () => {
       prisma.user.findFirst.mockResolvedValueOnce(null);
       await expect(service.get(teamLead, 'other')).rejects.toThrow(NotFoundException);
-      expect(prisma.user.findFirst).toHaveBeenCalledWith({ where: { id: 'other', role: 'CODER', teamId: TEAM } });
+      expect(prisma.user.findFirst.mock.calls[0][0].where).toEqual({ id: 'other', role: 'CODER', teamId: TEAM });
     });
 
     it('includes production stats from current versions', async () => {
@@ -89,6 +90,12 @@ describe('CodersService (Team Lead coder management)', () => {
       const detail = await service.get(teamLead, 'c-1');
       expect(detail.stats).toEqual({ charts: 2, completed: 1, inProgress: 0, rework: 1, pages: 14, dos: 3, icds: 6 });
       expect(prisma.productionEntry.findMany.mock.calls[0][0].where).toEqual({ coderId: 'c-1', isCurrent: true });
+    });
+
+    it('surfaces the Coder\'s Vendor by name (section 10 profile field), not just vendorId', async () => {
+      prisma.user.findFirst.mockResolvedValueOnce({ ...coderRow, vendorId: 'v-1', vendor: { id: 'v-1', name: 'Vendor Alpha' } });
+      const detail = await service.get(teamLead, 'c-1');
+      expect(detail.vendor).toEqual({ id: 'v-1', name: 'Vendor Alpha' });
     });
 
     it('edits only employee ID, full name and email, rejects duplicates, and logs the change', async () => {

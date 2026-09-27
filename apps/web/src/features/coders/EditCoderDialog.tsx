@@ -8,9 +8,9 @@ import { Button, Input, Modal, useToast } from '@smartcode/ui';
 import { errorMessage } from '@/lib/format';
 import { useUpdateCoder } from './use-coders';
 
-export function EditCoderDialog({ open, onClose, coder }: { open: boolean; onClose: () => void; coder: Coder | null }) {
+export function EditCoderDialog({ open, onClose, coder, basePath }: { open: boolean; onClose: () => void; coder: Coder | null; basePath?: string }) {
   const { showToast } = useToast();
-  const updateCoder = useUpdateCoder();
+  const updateCoder = useUpdateCoder(basePath);
   const {
     register,
     handleSubmit,

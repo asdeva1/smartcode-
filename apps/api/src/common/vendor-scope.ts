@@ -51,9 +51,36 @@ export function vendorMemberWhere(vendorId: string, role: 'TEAM_LEAD' | 'AUDITOR
   return { role, vendorAssignments: activeIn(vendorId) };
 }
 
-/** Coders in the vendor's teams. */
+/**
+ * Coders belonging to the vendor: either through their team (the classic
+ * derived path - team's Team Lead is actively assigned to this vendor) OR
+ * through the direct vendorId set at creation (a vendor-created Coder can
+ * exist before any Team Lead has been assigned to the vendor, so it has
+ * no team yet and the derived path alone would miss it). Both paths are
+ * kept in sync by the cascade in vendors.service.ts#assignTeamLead, so in
+ * steady state every vendor Coder matches both; this OR is what keeps a
+ * newly-created, not-yet-cascaded Coder visible in the meantime.
+ */
 export function vendorCoderWhere(vendorId: string): Prisma.UserWhereInput {
-  return { role: 'CODER', team: vendorTeamWhere(vendorId) };
+  return { role: 'CODER', OR: [{ team: vendorTeamWhere(vendorId) }, { vendorId }] };
+}
+
+/**
+ * The Team the vendor's currently active Team Lead leads, or undefined if
+ * the vendor has no active Team Lead assigned yet. This is the single
+ * place that answers "what team should this vendor's Coders be in right
+ * now" - used both when a Vendor Portal Coder is created and when the
+ * Manager (re)assigns the vendor's Team Lead.
+ */
+export async function vendorActiveTeamLeadTeamId(
+  db: { vendorAssignment: { findFirst: (args: any) => Promise<any> } },
+  vendorId: string,
+): Promise<string | undefined> {
+  const row = await db.vendorAssignment.findFirst({
+    where: { vendorId, role: 'TEAM_LEAD', isActive: true },
+    select: { user: { select: { leadsTeam: { select: { id: true } } } } },
+  });
+  return row?.user?.leadsTeam?.id ?? undefined;
 }
 
 /** Vendor accounts must carry their vendor; anything else is a broken account and fails closed. */

@@ -20,9 +20,9 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-/** "View coder": account details plus current production counts. */
-export function CoderDetailDrawer({ coderId, onClose }: { coderId: string | null; onClose: () => void }) {
-  const { data, isLoading, isError, refetch } = useCoder(coderId);
+/** "View coder": account details, assigned Team Lead/Project(s), plus current production counts. */
+export function CoderDetailDrawer({ coderId, onClose, basePath }: { coderId: string | null; onClose: () => void; basePath?: string }) {
+  const { data, isLoading, isError, refetch } = useCoder(coderId, basePath);
   return (
     <Drawer open={!!coderId} onClose={onClose} title="Coder details" width={460}>
       {isLoading ? (
@@ -37,6 +37,9 @@ export function CoderDetailDrawer({ coderId, onClose }: { coderId: string | null
             <Field label="Login Name" value={data.loginName} />
             <Field label="Email" value={data.email} />
             <Field label="Status" value={data.isActive ? 'Active' : 'Inactive'} />
+            <Field label="Vendor" value={data.vendor ? data.vendor.name : '—'} />
+            <Field label="Team Lead" value={data.teamLead ? data.teamLead.fullName ?? data.teamLead.loginName : 'Not assigned yet'} />
+            <Field label="Project(s)" value={data.projects?.length ? data.projects.map((p) => p.name).join(', ') : '—'} />
             <Field label="Created" value={formatDate(data.createdAt)} />
             <Field label="Last Login" value={data.lastLoginAt ? new Date(data.lastLoginAt).toLocaleString() : 'Never'} />
           </div>

@@ -39,7 +39,10 @@ export interface SessionUserRow {
  * The vendor whose scope the caller operates in (null = no vendor):
  * VENDOR account -> its own vendor; TEAM_LEAD / AUDITOR -> their single
  * active assignment; CODER -> their Team Lead's assignment (a Coder
- * belongs to the vendor through their team). Managers are global.
+ * belongs to the vendor through their team) falling back to the Coder's
+ * own vendorId - a Vendor-Portal-created Coder can exist before any Team
+ * Lead has been assigned to the vendor (no team yet), so the team-derived
+ * path alone would miss it. Managers are global.
  */
 export function resolveVendorId(user: SessionUserRow): string | null {
   switch (user.role) {
@@ -49,7 +52,7 @@ export function resolveVendorId(user: SessionUserRow): string | null {
     case 'AUDITOR':
       return user.vendorAssignments?.[0]?.vendorId ?? null;
     case 'CODER':
-      return user.team?.teamLead?.vendorAssignments?.[0]?.vendorId ?? null;
+      return user.team?.teamLead?.vendorAssignments?.[0]?.vendorId ?? user.vendorId ?? null;
     default:
       return null;
   }

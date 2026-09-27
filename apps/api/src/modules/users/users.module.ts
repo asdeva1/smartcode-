@@ -9,6 +9,6 @@ import { AuthModule } from '../auth/auth.module';
   imports: [AuthModule], // for RolesGuard
   controllers: [UsersController, CodersController],
   providers: [UsersService, CodersService],
-  exports: [UsersService],
+  exports: [UsersService, CodersService],
 })
 export class UsersModule {}

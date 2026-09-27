@@ -36,6 +36,14 @@ export interface Coder {
   isActive: boolean;
   createdAt: string;
   lastLoginAt: string | null;
+  /** Set once at creation - whichever Vendor created/owns this Coder (Vendor Portal or a Team-Lead-under-a-vendor); null otherwise. */
+  vendorId?: string | null;
+  /** Same Vendor as vendorId, resolved to its display name for the Coder profile (section 10). */
+  vendor?: { id: string; name: string } | null;
+  /** Derived through the Coder's current team - see docs/09-BUSINESS-RULES.md "Vendor -> Team Lead -> Coder Hierarchy". */
+  team?: { id: string; name: string } | null;
+  teamLead?: { id: string; fullName: string | null; employeeId: string; loginName: string } | null;
+  projects?: { id: string; name: string }[];
 }
 
 export interface CoderListResponse {

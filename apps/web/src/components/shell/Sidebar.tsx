@@ -35,8 +35,22 @@ export function Sidebar({ role }: { role: Role }) {
       }}
     >
       <Box sx={{ px: 2, py: 2.5, display: 'flex', alignItems: 'center', gap: 1 }}>
-        {/* Brand logo asset lives at public/smartclues-logo.png - see brief Section 12 */}
-        <img src="/smartclues-logo.png" alt="SmartClues Technologies" height={32} />
+        {/*
+          Brand logo asset lives at public/smartclues-logo.png. Sized up
+          from the previous 32px implementation to a clearly visible,
+          professional size (docs/09-BUSINESS-RULES.md section 13) -
+          width stays auto so the aspect ratio is never distorted, and
+          max-width keeps it inside the sidebar's own padding regardless
+          of the source image's proportions. Sidebar width, nav spacing,
+          typography, colors and the separate login-page logo (its own
+          <img> in app/login/page.tsx) are all left exactly as they were.
+        */}
+        <img
+          src="/smartclues-logo.png"
+          alt="SmartClues Technologies"
+          height={48}
+          style={{ width: 'auto', maxWidth: '100%', objectFit: 'contain' }}
+        />
       </Box>
       <List sx={{ px: 1, flex: 1 }}>
         {items.map((item) => {

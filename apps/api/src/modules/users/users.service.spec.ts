@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { BadRequestException, ForbiddenException, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ValidationPipe } from '@nestjs/common';
 import type { AuthUser } from '@smartcode/types';
 import { UsersService } from './users.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -443,5 +443,239 @@ describe('Create Team Lead - confirmPassword', () => {
       expect(prisma.user.create.mock.calls[0][0].data).not.toHaveProperty('confirmPassword');
       expect(prisma.team.update).toHaveBeenCalledWith({ where: { id: TEAM_ID }, data: { teamLeadId: 'tl-new' } });
     });
+  });
+});
+
+/**
+ * docs/09-BUSINESS-RULES.md section 6/7 (Password Reset) and section 8
+ * (Login Name Change). Covers required-tests items 16-22, 27-28 from
+ * section 18: Manager resets Team Lead/Coder/Auditor/Vendor passwords,
+ * an authorized Team Lead resets only its own-team Coder, passwords are
+ * Argon2 hashed and never logged in plaintext, old sessions are revoked
+ * (passwordChangedAt bump), duplicate Login Names are rejected, and the
+ * change is audited without altering the User row's identity.
+ */
+describe('UsersService.resetPassword', () => {
+  let service: UsersService;
+  let prisma: {
+    auditLog: { create: jest.Mock };
+    user: { findUnique: jest.Mock; update: jest.Mock };
+  };
+
+  const managerCaller: AuthUser = {
+    id: 'manager-1',
+    employeeId: 'EMP0001',
+    loginName: 'manager.admin',
+    email: 'm@smartclues.local',
+    role: 'MANAGER',
+    teamId: null,
+    isActive: true,
+  };
+
+  const teamLeadCaller: AuthUser = {
+    id: 'tl-1',
+    employeeId: 'EMP0002',
+    loginName: 'tl.one',
+    email: 'tl@smartclues.local',
+    role: 'TEAM_LEAD',
+    teamId: 'team-1',
+    isActive: true,
+  };
+
+  const otherTeamLeadCaller: AuthUser = { ...teamLeadCaller, id: 'tl-2', teamId: 'team-2' };
+
+  const coderTarget = {
+    id: 'coder-1',
+    loginName: 'coder.one',
+    role: 'CODER',
+    teamId: 'team-1',
+  };
+
+  const vendorTarget = { id: 'vendor-1', loginName: 'vendor.one', role: 'VENDOR', teamId: null };
+  const anotherManager = { id: 'manager-2', loginName: 'manager.two', role: 'MANAGER', teamId: null };
+
+  beforeEach(async () => {
+    prisma = {
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+      user: { findUnique: jest.fn(), update: jest.fn() },
+    };
+
+    const moduleRef = await Test.createTestingModule({
+      providers: [UsersService, { provide: PrismaService, useValue: prisma }],
+    }).compile();
+
+    service = moduleRef.get(UsersService);
+  });
+
+  it('lets a Manager reset a Coder password', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce(coderTarget);
+    prisma.user.update.mockResolvedValueOnce({});
+    const result = await service.resetPassword(managerCaller, coderTarget.id);
+    expect(result).toMatchObject({ id: coderTarget.id, loginName: coderTarget.loginName });
+    expect(result.temporaryPassword).toMatch(/^.{12}$/);
+  });
+
+  it('lets a Manager reset a Team Lead, Auditor or Vendor password', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce(vendorTarget);
+    prisma.user.update.mockResolvedValueOnce({});
+    const result = await service.resetPassword(managerCaller, vendorTarget.id);
+    expect(result.temporaryPassword).toBeTruthy();
+  });
+
+  it('rejects a Manager resetting another Manager\'s password', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce(anotherManager);
+    await expect(service.resetPassword(managerCaller, anotherManager.id)).rejects.toThrow(ForbiddenException);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('lets an authorized Team Lead reset a scoped Coder\'s password', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce(coderTarget);
+    prisma.user.update.mockResolvedValueOnce({});
+    const result = await service.resetPassword(teamLeadCaller, coderTarget.id);
+    expect(result.id).toBe(coderTarget.id);
+  });
+
+  it('rejects a Team Lead resetting a Coder outside their own team', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce(coderTarget);
+    await expect(service.resetPassword(otherTeamLeadCaller, coderTarget.id)).rejects.toThrow(ForbiddenException);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects a Team Lead resetting another Team Lead\'s password', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce({ id: 'tl-9', loginName: 'tl.nine', role: 'TEAM_LEAD', teamId: null });
+    await expect(service.resetPassword(teamLeadCaller, 'tl-9')).rejects.toThrow(ForbiddenException);
+  });
+
+  it('hashes the new password with Argon2 and stamps passwordChangedAt (revokes old sessions/tokens)', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce(coderTarget);
+    prisma.user.update.mockResolvedValueOnce({});
+    const before = Date.now();
+    const result = await service.resetPassword(managerCaller, coderTarget.id);
+
+    const data = prisma.user.update.mock.calls[0][0].data;
+    expect(data.passwordHash).toMatch(/^\$argon2/);
+    expect(data.passwordHash).not.toBe(result.temporaryPassword);
+    expect(data.passwordChangedAt).toBeInstanceOf(Date);
+    expect(data.passwordChangedAt.getTime()).toBeGreaterThanOrEqual(before);
+    expect(data.failedLoginCount).toBe(0);
+    expect(data.lockedUntil).toBeNull();
+  });
+
+  it('never logs or returns the password anywhere except the one-time response', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce(coderTarget);
+    prisma.user.update.mockResolvedValueOnce({});
+    const result = await service.resetPassword(managerCaller, coderTarget.id);
+
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ action: 'PASSWORD_RESET', entity: 'User', entityId: coderTarget.id }) }),
+    );
+    const logged = JSON.stringify(prisma.auditLog.create.mock.calls);
+    expect(logged).not.toContain(result.temporaryPassword);
+    const updateArgs = JSON.stringify(prisma.user.update.mock.calls);
+    expect(updateArgs).not.toContain(result.temporaryPassword);
+  });
+
+  it('404s for a non-existent user', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce(null);
+    await expect(service.resetPassword(managerCaller, 'missing')).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('UsersService.changeLoginName', () => {
+  let service: UsersService;
+  let prisma: {
+    auditLog: { create: jest.Mock };
+    user: { findUnique: jest.Mock; findFirst: jest.Mock; update: jest.Mock };
+  };
+
+  const managerCaller: AuthUser = {
+    id: 'manager-1',
+    employeeId: 'EMP0001',
+    loginName: 'manager.admin',
+    email: 'm@smartclues.local',
+    role: 'MANAGER',
+    teamId: null,
+    isActive: true,
+  };
+
+  const teamLeadCaller: AuthUser = {
+    id: 'tl-1',
+    employeeId: 'EMP0002',
+    loginName: 'tl.one',
+    email: 'tl@smartclues.local',
+    role: 'TEAM_LEAD',
+    teamId: 'team-1',
+    isActive: true,
+  };
+
+  const coderTarget = { id: 'coder-1', loginName: 'coder.one', role: 'CODER', teamId: 'team-1' };
+
+  beforeEach(async () => {
+    prisma = {
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+      user: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+    };
+
+    const moduleRef = await Test.createTestingModule({
+      providers: [UsersService, { provide: PrismaService, useValue: prisma }],
+    }).compile();
+
+    service = moduleRef.get(UsersService);
+  });
+
+  it('rejects a non-Manager changing a Login Name directly (Team Lead must use the request/approval flow)', async () => {
+    await expect(service.changeLoginName(teamLeadCaller, coderTarget.id, 'new.name')).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('lets a Manager change where authorized (Coder/Team Lead/Auditor/Vendor)', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce(coderTarget);
+    prisma.user.findFirst.mockResolvedValueOnce(null);
+    prisma.user.update.mockResolvedValueOnce({ ...coderTarget, loginName: 'new.name' });
+    const result = await service.changeLoginName(managerCaller, coderTarget.id, 'new.name');
+    expect(result).toEqual({ id: coderTarget.id, loginName: 'new.name' });
+  });
+
+  it('rejects a duplicate Login Name', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce(coderTarget);
+    prisma.user.findFirst.mockResolvedValueOnce({ id: 'someone-else' });
+    await expect(service.changeLoginName(managerCaller, coderTarget.id, 'taken.name')).rejects.toThrow(
+      ConflictException,
+    );
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects a Manager changing another Manager\'s Login Name', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce({ id: 'manager-2', loginName: 'manager.two', role: 'MANAGER', teamId: null });
+    await expect(service.changeLoginName(managerCaller, 'manager-2', 'new.name')).rejects.toThrow(ForbiddenException);
+  });
+
+  it('preserves the User id, is a no-op when unchanged, and is audited with before/after when changed (identity/history untouched)', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce(coderTarget);
+    const noop = await service.changeLoginName(managerCaller, coderTarget.id, coderTarget.loginName);
+    expect(noop).toEqual({ id: coderTarget.id, loginName: coderTarget.loginName });
+    expect(prisma.user.update).not.toHaveBeenCalled();
+
+    prisma.user.findUnique.mockResolvedValueOnce(coderTarget);
+    prisma.user.findFirst.mockResolvedValueOnce(null);
+    prisma.user.update.mockResolvedValueOnce({ ...coderTarget, loginName: 'renamed' });
+    await service.changeLoginName(managerCaller, coderTarget.id, 'renamed');
+    expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: coderTarget.id }, data: { loginName: 'renamed' } });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: 'LOGIN_NAME_CHANGED',
+          entity: 'User',
+          entityId: coderTarget.id,
+        }),
+      }),
+    );
+  });
+
+  it('404s for a non-existent user', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce(null);
+    await expect(service.changeLoginName(managerCaller, 'missing', 'x')).rejects.toThrow(NotFoundException);
   });
 });
