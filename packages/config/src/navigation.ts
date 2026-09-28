@@ -30,6 +30,7 @@ export const NAVIGATION: Record<Role, NavItem[]> = {
     { label: 'Activity Logs', href: '/manager/activity-logs', icon: 'History' },
     { label: 'Audit Logs', href: '/manager/audit-logs', icon: 'ScrollText' },
     { label: 'Approvals', href: '/manager/approvals', icon: 'CheckSquare' },
+    { label: 'Password Reset Requests', href: '/manager/password-reset-requests', icon: 'KeyRound' },
     { label: 'Settings', href: '/manager/settings', icon: 'Settings' },
   ],
   VENDOR: [

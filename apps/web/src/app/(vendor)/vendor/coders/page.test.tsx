@@ -83,13 +83,31 @@ describe('Vendor Portal - Coders page', () => {
     expect(within(drawer).getByText('Project 001')).toBeInTheDocument();
   });
 
-  it('has no Reset Password or Login Name change action (Vendor is not authorized for either)', async () => {
+  it('has no Login Name change action (Vendor is not authorized to request that)', async () => {
     routeApi(fetchMock, { 'GET /vendor/coders?': page([coderWithTeamLead]) });
     const user = userEvent.setup();
     renderWithProviders(<CodersPage />);
     await user.click(await screen.findByRole('button', { name: 'Actions for Assigned Coder' }));
-    expect(screen.queryByRole('menuitem', { name: 'Reset Password' })).not.toBeInTheDocument();
     expect(screen.queryByRole('menuitem', { name: 'Request Login Name Change' })).not.toBeInTheDocument();
+  });
+
+  it('requests a Coder\'s password reset - never resets directly, never shows a password (Phase 8)', async () => {
+    routeApi(fetchMock, {
+      'GET /vendor/coders?': page([coderWithTeamLead]),
+      'POST /users/c-2/reset-password-request': { id: 'req-1', status: 'PENDING' },
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<CodersPage />);
+    await user.click(await screen.findByRole('button', { name: 'Actions for Assigned Coder' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Request Password Reset' }));
+    expect(await screen.findByText(/A Manager will review this/)).toBeInTheDocument();
+    expect(callsTo(fetchMock, '/users/c-2/reset-password-request', 'POST')).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'Request Password Reset' }));
+    await waitFor(() => expect(callsTo(fetchMock, '/users/c-2/reset-password-request', 'POST')).toHaveLength(1));
+    expect(await screen.findByText('Password reset requested - awaiting Manager approval.')).toBeInTheDocument();
+    // Vendor never resets directly, and no password is ever displayed.
+    expect(callsTo(fetchMock, '/users/c-2/reset-password', 'POST').filter(([p]) => p === '/users/c-2/reset-password')).toHaveLength(0);
   });
 
   it('deactivates through the shared /users endpoint, scoped server-side to the caller\'s own vendor', async () => {

@@ -130,26 +130,23 @@ describe('Team Lead - Coders page', () => {
     });
   });
 
-  it('resets a Coder\'s password: confirm, then a one-time display of the temporary password', async () => {
+  it('requests a Coder\'s password reset - never resets directly, never shows a password (Phase 8)', async () => {
     routeApi(fetchMock, {
       'GET /team-leads/coders?': page([coder]),
-      'POST /users/c-1/reset-password': { id: 'c-1', loginName: 'cody', temporaryPassword: 'Tmp9!xYzAbc' },
+      'POST /users/c-1/reset-password-request': { id: 'req-1', status: 'PENDING' },
     });
     const user = userEvent.setup();
     renderWithProviders(<CodersPage />);
     await user.click(await screen.findByRole('button', { name: 'Actions for Cody Coder' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Reset Password' }));
-    expect(await screen.findByText(/Generate a new one-time password for Cody Coder/)).toBeInTheDocument();
-    expect(callsTo(fetchMock, '/users/c-1/reset-password', 'POST')).toHaveLength(0);
+    await user.click(screen.getByRole('menuitem', { name: 'Request Password Reset' }));
+    expect(await screen.findByText(/A Manager will review this/)).toBeInTheDocument();
+    expect(callsTo(fetchMock, '/users/c-1/reset-password-request', 'POST')).toHaveLength(0);
 
-    await user.click(screen.getByRole('button', { name: 'Reset Password' }));
-    await waitFor(() => expect(callsTo(fetchMock, '/users/c-1/reset-password', 'POST')).toHaveLength(1));
-    expect(await screen.findByText('Password reset')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Tmp9!xYzAbc')).toBeInTheDocument();
-    expect(screen.getByText(/shown only once/)).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Done' }));
-    await waitFor(() => expect(screen.queryByText('Password reset')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Request Password Reset' }));
+    await waitFor(() => expect(callsTo(fetchMock, '/users/c-1/reset-password-request', 'POST')).toHaveLength(1));
+    expect(await screen.findByText('Password reset requested - awaiting Manager approval.')).toBeInTheDocument();
+    // Never a direct reset, and no password is ever displayed to the Team Lead.
+    expect(callsTo(fetchMock, '/users/c-1/reset-password', 'POST').filter(([p]) => p === '/users/c-1/reset-password')).toHaveLength(0);
   });
 
   it('requests a Coder Login Name change - filed as pending, never applied directly', async () => {

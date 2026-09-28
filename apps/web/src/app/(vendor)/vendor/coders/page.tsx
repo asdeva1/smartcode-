@@ -14,7 +14,6 @@ export default function Page() {
     <CodersManager
       basePath="/vendor/coders"
       showImportExport={false}
-      allowResetPassword={false}
       allowLoginNameRequest={false}
       headerActions={(actions) => (
         <PageHeader

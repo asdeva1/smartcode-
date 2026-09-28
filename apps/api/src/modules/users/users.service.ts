@@ -238,10 +238,14 @@ export class UsersService {
   }
 
   /**
-   * Password reset (docs/09-BUSINESS-RULES.md sections 6/7/11):
-   *   - Manager resets Team Lead / Coder / Auditor / Vendor passwords
-   *     (never another Manager's).
-   *   - Team Lead resets a Coder's password, only within their own team.
+   * Direct password reset (docs/09-BUSINESS-RULES.md sections 6/7/11) -
+   * MANAGER ONLY as of Phase 8. A Vendor/Team Lead can no longer reset a
+   * Coder's password directly; they REQUEST one instead, and only a
+   * Manager's approval generates a single-use reset link (see
+   * PasswordResetService in modules/password-reset). Manager keeps this
+   * direct path for every role it may reset (Team Lead / Coder / Auditor /
+   * Vendor, never another Manager) - e.g. a Manager resetting a Vendor
+   * account's own login, which has no "request" step at all.
    * Generates a one-time random password (never a client-supplied value -
    * this is a reset, not a "set password" form), hashes it with the same
    * Argon2 path every account uses, and stamps passwordChangedAt so every
@@ -255,9 +259,7 @@ export class UsersService {
     const target = await this.prisma.user.findUnique({ where: { id: targetId } });
     if (!target) throw new NotFoundException('User not found');
 
-    const allowed =
-      (caller.role === 'MANAGER' && target.role !== 'MANAGER') ||
-      (caller.role === 'TEAM_LEAD' && target.role === 'CODER' && caller.teamId !== null && target.teamId === caller.teamId);
+    const allowed = caller.role === 'MANAGER' && target.role !== 'MANAGER';
 
     if (!allowed) {
       throw new ForbiddenException("You are not permitted to reset this user's password");

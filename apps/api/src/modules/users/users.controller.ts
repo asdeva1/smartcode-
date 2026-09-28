@@ -100,10 +100,10 @@ export class UsersController {
   }
 
   @Post('users/:id/reset-password')
-  @Roles('MANAGER', 'TEAM_LEAD')
+  @Roles('MANAGER')
   @ApiOperation({
     summary:
-      "Reset a user's password to a one-time temporary password (Manager: Team Lead/Coder/Auditor/Vendor, Team Lead: own-team Coder only)",
+      "Manager directly resets a user's password to a one-time temporary password (Team Lead/Coder/Auditor/Vendor, never another Manager). A Vendor/Team Lead cannot reset directly - see POST /users/:id/reset-password-request.",
   })
   resetPassword(@CurrentUser() caller: AuthUser, @Param('id') id: string) {
     return this.usersService.resetPassword(caller, id);

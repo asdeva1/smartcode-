@@ -17,6 +17,7 @@ import { VendorsModule } from './modules/vendors/vendors.module';
 import { ReworkModule } from './modules/rework/rework.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ApprovalsModule } from './modules/approvals/approvals.module';
+import { PasswordResetModule } from './modules/password-reset/password-reset.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { envValidationSchema } from './config/env.validation';
 
@@ -46,6 +47,7 @@ import { envValidationSchema } from './config/env.validation';
     ReworkModule,
     NotificationsModule,
     ApprovalsModule,
+    PasswordResetModule,
     HealthModule,
   ],
   providers: [

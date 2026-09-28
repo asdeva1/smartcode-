@@ -528,11 +528,14 @@ describe('UsersService.resetPassword', () => {
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
-  it('lets an authorized Team Lead reset a scoped Coder\'s password', async () => {
+  // Phase 8: a Team Lead (and a Vendor) can no longer reset a Coder's
+  // password directly at all - they can only REQUEST one, which a Manager
+  // must approve (see PasswordResetService). This direct method is now
+  // Manager-only, for every role it's already authorized to reset.
+  it('rejects a Team Lead attempting a direct reset of a scoped Coder\'s password (must use the request flow instead)', async () => {
     prisma.user.findUnique.mockResolvedValueOnce(coderTarget);
-    prisma.user.update.mockResolvedValueOnce({});
-    const result = await service.resetPassword(teamLeadCaller, coderTarget.id);
-    expect(result.id).toBe(coderTarget.id);
+    await expect(service.resetPassword(teamLeadCaller, coderTarget.id)).rejects.toThrow(ForbiddenException);
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
   it('rejects a Team Lead resetting a Coder outside their own team', async () => {

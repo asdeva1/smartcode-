@@ -15,3 +15,4 @@ export * from './schemas/vendor';
 export * from './schemas/rework';
 export * from './schemas/notification';
 export * from './schemas/approval';
+export * from './schemas/password-reset';

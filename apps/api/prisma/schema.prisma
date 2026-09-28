@@ -118,6 +118,15 @@ model User {
   approvalsRequested       ApprovalRequest[]  @relation("ApprovalRequestedBy")
   approvalsReviewed        ApprovalRequest[]  @relation("ApprovalReviewedBy")
 
+  // Password Reset Request workflow (docs/09-BUSINESS-RULES.md section 8) -
+  // a Vendor/Team Lead requests a reset for one of their own-scope Coders;
+  // only a Manager can approve (generating a single-use reset link/token)
+  // or reject it.
+  passwordResetRequestsAsTarget  PasswordResetRequest[] @relation("PasswordResetTarget")
+  passwordResetRequestsRequested PasswordResetRequest[] @relation("PasswordResetRequestedBy")
+  passwordResetRequestsReviewed  PasswordResetRequest[] @relation("PasswordResetReviewedBy")
+  passwordResetTokens            PasswordResetToken[]   @relation("PasswordResetTokenUser")
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -519,4 +528,84 @@ model ApprovalRequest {
   @@index([type, status])
   @@index([targetUserId])
   @@index([requestedById])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Password Reset Request (docs/09-BUSINESS-RULES.md section 8)
+// ─────────────────────────────────────────────────────────────
+// A Vendor/Team Lead can no longer directly reset a Coder's password (see
+// UsersService.resetPassword, still used by the Manager only, directly).
+// Instead they REQUEST a reset; only a Manager can Approve (which
+// generates a single-use, time-limited PasswordResetToken and returns the
+// reset URL once) or Reject it (no token is ever generated). This is a
+// dedicated model rather than a new ApprovalRequest type because it needs
+// its own child table (PasswordResetToken) with its own lifecycle
+// (expiry/used/invalidated) that a generic JSON payload cannot express.
+
+enum PasswordResetRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+model PasswordResetRequest {
+  id     String                     @id @default(uuid())
+  status PasswordResetRequestStatus @default(PENDING)
+
+  // The account whose password would be reset - a Coder, in every case
+  // this phase's request-side authorization allows (see
+  // PasswordResetService.request).
+  targetUserId String
+  targetUser   User   @relation("PasswordResetTarget", fields: [targetUserId], references: [id])
+
+  requestedById String
+  requestedBy   User     @relation("PasswordResetRequestedBy", fields: [requestedById], references: [id])
+  requestedAt   DateTime @default(now())
+  reason        String?
+
+  reviewedById    String?
+  reviewedBy      User?     @relation("PasswordResetReviewedBy", fields: [reviewedById], references: [id])
+  reviewedAt      DateTime?
+  rejectionReason String?
+
+  // Normally at most one token per request (created on Approve), but kept
+  // as a relation rather than 1:1 fields so a future re-issue/resend never
+  // needs a schema change - only the "one live token" invariant, enforced
+  // in the service layer.
+  tokens PasswordResetToken[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // The Manager's queue is "pending requests"; a target/requester's own
+  // history is looked up almost as often.
+  @@index([status])
+  @@index([targetUserId])
+  @@index([requestedById])
+}
+
+model PasswordResetToken {
+  id String @id @default(uuid())
+
+  requestId String
+  request   PasswordResetRequest @relation(fields: [requestId], references: [id])
+
+  userId String
+  user   User   @relation("PasswordResetTokenUser", fields: [userId], references: [id])
+
+  // ONLY a SHA-256 hash of the cryptographically random raw token is ever
+  // stored - see apps/api/src/common/reset-token.ts. The raw token exists
+  // only long enough to build the URL returned once, to the Manager, at
+  // Approve time; it is never persisted, logged, or returned again.
+  tokenHash String @unique
+
+  expiresAt     DateTime
+  usedAt        DateTime?
+  invalidatedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([requestId])
 }

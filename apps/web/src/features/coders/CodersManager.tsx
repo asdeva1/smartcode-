@@ -15,7 +15,7 @@ import { useCoders, useInvalidateCodersAfterImport, useSetCoderActive } from './
 import { CreateCoderDialog } from './CreateCoderDialog';
 import { EditCoderDialog } from './EditCoderDialog';
 import { CoderDetailDrawer } from './CoderDetailDrawer';
-import { ResetPasswordDialog, type ResetPasswordTarget } from '@/features/users/ResetPasswordDialog';
+import { RequestPasswordResetDialog, type RequestPasswordResetTarget } from '@/features/users/RequestPasswordResetDialog';
 import { RequestLoginNameChangeDialog, type LoginNameChangeTarget } from './RequestLoginNameChangeDialog';
 
 const PAGE_SIZE = 25;
@@ -27,10 +27,12 @@ const name = (c: Coder) => c.fullName ?? c.loginName;
  * status filter, pagination, refresh, view, create, edit,
  * activate/deactivate. CSV import and export are Team-Lead-only for now
  * (showImportExport=false hides both on the Vendor Portal screen).
- * Password reset (docs/09-BUSINESS-RULES.md section 7) and requesting a
- * Login Name change (section 9) are likewise Team-Lead-only - a Vendor is
- * not authorized to reset a Coder's password or request their Login Name
- * change, so the Vendor Portal screen passes both flags false.
+ * Password reset (docs/09-BUSINESS-RULES.md section 8, Phase 8) is a
+ * REQUEST only, for both Team Lead and Vendor - neither can reset a
+ * Coder's password directly; a Manager must approve the request before a
+ * reset link is generated. Requesting a Login Name change (section 9)
+ * remains Team-Lead-only - a Vendor is not authorized to request that, so
+ * the Vendor Portal screen passes that one flag false.
  */
 export function CodersManager({
   headerActions,
@@ -55,7 +57,7 @@ export function CodersManager({
   const [viewId, setViewId] = React.useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = React.useState<Coder | null>(null);
   const [menu, setMenu] = React.useState<{ el: HTMLElement; row: Coder } | null>(null);
-  const [resetTarget, setResetTarget] = React.useState<ResetPasswordTarget | null>(null);
+  const [resetTarget, setResetTarget] = React.useState<RequestPasswordResetTarget | null>(null);
   const [loginNameTarget, setLoginNameTarget] = React.useState<LoginNameChangeTarget | null>(null);
 
   const filters = { search: search || undefined, status };
@@ -191,7 +193,7 @@ export function CodersManager({
               setMenu(null);
             }}
           >
-            Reset Password
+            Request Password Reset
           </MenuItem>
         )}
         {allowLoginNameRequest && (
@@ -228,7 +230,7 @@ export function CodersManager({
       <CreateCoderDialog open={createOpen} onClose={() => setCreateOpen(false)} basePath={basePath} />
       <EditCoderDialog open={!!editTarget} onClose={() => setEditTarget(null)} coder={editTarget} basePath={basePath} />
       <CoderDetailDrawer coderId={viewId} onClose={() => setViewId(null)} basePath={basePath} />
-      {allowResetPassword && <ResetPasswordDialog target={resetTarget} onClose={() => setResetTarget(null)} />}
+      {allowResetPassword && <RequestPasswordResetDialog target={resetTarget} onClose={() => setResetTarget(null)} />}
       {allowLoginNameRequest && <RequestLoginNameChangeDialog target={loginNameTarget} onClose={() => setLoginNameTarget(null)} />}
       {showImportExport && (
         <CsvImportDialog

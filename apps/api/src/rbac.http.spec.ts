@@ -88,7 +88,8 @@ const ROUTES: { method: Method; path: string; allowed: Role[] }[] = [
   { method: 'get', path: '/api/manager/auditors', allowed: ['MANAGER'] },
   { method: 'patch', path: `/api/manager/auditors/${ID}`, allowed: ['MANAGER'] },
   { method: 'patch', path: `/api/users/${ID}/deactivate`, allowed: ['MANAGER', 'TEAM_LEAD'] },
-  { method: 'post', path: `/api/users/${ID}/reset-password`, allowed: ['MANAGER', 'TEAM_LEAD'] },
+  { method: 'post', path: `/api/users/${ID}/reset-password`, allowed: ['MANAGER'] },
+  { method: 'post', path: `/api/users/${ID}/reset-password-request`, allowed: ['VENDOR', 'TEAM_LEAD'] },
   { method: 'patch', path: `/api/users/${ID}/login-name`, allowed: ['MANAGER'] },
   { method: 'post', path: '/api/team-leads/coders', allowed: ['TEAM_LEAD'] },
   { method: 'get', path: '/api/team-leads/coders', allowed: ['TEAM_LEAD'] },
@@ -99,6 +100,14 @@ const ROUTES: { method: Method; path: string; allowed: Role[] }[] = [
   { method: 'get', path: '/api/manager/approvals', allowed: ['MANAGER'] },
   { method: 'patch', path: `/api/manager/approvals/${ID}/approve`, allowed: ['MANAGER'] },
   { method: 'patch', path: `/api/manager/approvals/${ID}/reject`, allowed: ['MANAGER'] },
+  { method: 'get', path: '/api/manager/password-reset-requests', allowed: ['MANAGER'] },
+  { method: 'patch', path: `/api/manager/password-reset-requests/${ID}/approve`, allowed: ['MANAGER'] },
+  { method: 'patch', path: `/api/manager/password-reset-requests/${ID}/reject`, allowed: ['MANAGER'] },
+  // Public - no @Roles at all, so every authenticated role passes RolesGuard
+  // trivially; the route itself is also reachable with no token at all
+  // (see the dedicated "public and does not leak" tests below).
+  { method: 'post', path: '/api/password-reset/validate', allowed: ALL },
+  { method: 'post', path: '/api/password-reset/complete', allowed: ALL },
   { method: 'get', path: '/api/manager/projects', allowed: ['MANAGER'] },
   { method: 'post', path: '/api/manager/auditor-assignments', allowed: ['MANAGER'] },
   { method: 'get', path: '/api/projects/mine', allowed: ALL },
@@ -311,5 +320,30 @@ describe('HTTP behaviour of the new endpoints', () => {
   it('rejects a report outside the caller\'s role', async () => {
     const res = await request(app.getHttpServer()).get('/api/reports/auditor-productivity').set('Authorization', as('CODER'));
     expect(res.status).toBe(403);
+  });
+
+  it('a Vendor cannot request a password reset without specifying a real own-vendor Coder (server-side scope, not client-supplied)', async () => {
+    // vendorCoderWhere resolves to nothing for this mocked target, so the
+    // service must reject it - never trusting a client-supplied vendorId.
+    const res = await request(app.getHttpServer())
+      .post(`/api/users/${ID}/reset-password-request`)
+      .set('Authorization', as('VENDOR'))
+      .send({});
+    expect(res.status).toBe(404); // no such user in this mock - proves the lookup, not a client-trusted shortcut
+  });
+
+  it('the public password-reset endpoints are reachable with no Authorization header at all', async () => {
+    const validate = await request(app.getHttpServer()).post('/api/password-reset/validate').send({ token: 'whatever' });
+    expect(validate.status).not.toBe(401);
+    const complete = await request(app.getHttpServer())
+      .post('/api/password-reset/complete')
+      .send({ token: 'whatever', newPassword: 'Password1!', confirmNewPassword: 'Password1!' });
+    expect(complete.status).not.toBe(401);
+  });
+
+  it('an invalid reset token never reveals whose account it might belong to', async () => {
+    const res = await request(app.getHttpServer()).post('/api/password-reset/validate').send({ token: 'not-a-real-token' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ valid: false, reason: 'invalid' });
   });
 });
