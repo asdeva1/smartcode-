@@ -4,6 +4,7 @@ import { UsersService } from '../users/users.service';
 import { CodersService } from '../users/coders.service';
 import { ExportService } from '../../common/export/export.service';
 import { VendorsService } from './vendors.service';
+import type { LoginNameAllocationService } from '../login-name-allocations/login-name-allocation.service';
 
 /**
  * docs/09-BUSINESS-RULES.md "Vendor -> Team Lead -> Coder Hierarchy" /
@@ -30,7 +31,11 @@ describe('UsersService.createCoder - Vendor Portal + Team Lead creation, hierarc
       vendorAssignment: { findFirst: jest.fn().mockResolvedValue(null) },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
-    service = new UsersService(prisma);
+    // This hierarchy test never exercises changeLoginName, so a plain
+    // never-called stub is enough - the constructor now requires this
+    // argument (Phase 9 added this dependency).
+    const loginNameAllocations = { reallocate: jest.fn() } as unknown as LoginNameAllocationService;
+    service = new UsersService(prisma, loginNameAllocations);
   });
 
   it('[item 1/2] a Vendor creates a Coder, which receives vendorId = the caller\'s own vendor', async () => {

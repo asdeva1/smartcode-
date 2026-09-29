@@ -31,6 +31,8 @@ export const NAVIGATION: Record<Role, NavItem[]> = {
     { label: 'Audit Logs', href: '/manager/audit-logs', icon: 'ScrollText' },
     { label: 'Approvals', href: '/manager/approvals', icon: 'CheckSquare' },
     { label: 'Password Reset Requests', href: '/manager/password-reset-requests', icon: 'KeyRound' },
+    { label: 'Login Name Details', href: '/manager/login-name-details', icon: 'IdCard' },
+    { label: 'Employee Directory', href: '/manager/employees', icon: 'Users' },
     { label: 'Settings', href: '/manager/settings', icon: 'Settings' },
   ],
   VENDOR: [

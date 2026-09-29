@@ -2,6 +2,7 @@ import { ConflictException, ForbiddenException } from '@nestjs/common';
 import type { AuthUser } from '@smartcode/types';
 import { UsersService } from './users.service';
 import { ProjectsService } from '../projects/projects.service';
+import type { LoginNameAllocationService } from '../login-name-allocations/login-name-allocation.service';
 
 const manager: AuthUser = { id: 'm', employeeId: 'E', loginName: 'm', email: 'm@x.local', role: 'MANAGER', teamId: null, isActive: true };
 const teamLead: AuthUser = { ...manager, id: 'tl', role: 'TEAM_LEAD', teamId: 'team-1' };
@@ -26,7 +27,11 @@ describe('Users: vendor accounts, vendor filters and cross-vendor team changes',
       auditorProjectAssignment: { findMany: jest.fn().mockResolvedValue([]) },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
-    service = new UsersService(prisma);
+    // None of these vendor-account tests exercise changeLoginName, so a
+    // plain never-called stub is enough - the constructor now requires this
+    // argument (Phase 9 added this dependency).
+    const loginNameAllocations = { reallocate: jest.fn() } as unknown as LoginNameAllocationService;
+    service = new UsersService(prisma, loginNameAllocations);
   });
 
   it('only a Manager can create a Vendor account, and it is linked to its vendor', async () => {

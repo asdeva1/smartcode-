@@ -8,6 +8,7 @@ import type { AuthUser, Role } from '@smartcode/types';
 import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
 import { PrismaService } from '../../prisma/prisma.service';
+import { LoginNameAllocationService } from '../login-name-allocations/login-name-allocation.service';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ROLES_KEY } from '../../common/decorators/roles.decorator';
 import { CreateAuditorDto } from './dto/create-auditor.dto';
@@ -83,7 +84,15 @@ describe('UsersService - Auditor management', () => {
     };
 
     const moduleRef = await Test.createTestingModule({
-      providers: [UsersService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        UsersService,
+        { provide: PrismaService, useValue: prisma },
+        // None of these Auditor-management tests exercise
+        // changeLoginName, so a plain never-called stub is enough - Nest
+        // still needs the token registered to resolve UsersService's
+        // constructor at all (Phase 9 added this dependency).
+        { provide: LoginNameAllocationService, useValue: { reallocate: jest.fn() } },
+      ],
     }).compile();
 
     service = moduleRef.get(UsersService);

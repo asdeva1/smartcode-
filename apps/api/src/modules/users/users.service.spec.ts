@@ -4,6 +4,10 @@ import type { AuthUser } from '@smartcode/types';
 import { UsersService } from './users.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateTeamLeadDto } from './dto/create-team-lead.dto';
+import { LoginNameAllocationService } from '../login-name-allocations/login-name-allocation.service';
+
+/** UsersService.changeLoginName always calls this (Phase 9) - none of the other describe blocks in this file exercise it, so a plain resolved stub is enough everywhere except the dedicated changeLoginName block below. */
+const loginNameAllocationsStub = { reallocate: jest.fn().mockResolvedValue({}) };
 
 /**
  * Exercises UsersService.createWithRole directly - the actual code path
@@ -56,7 +60,7 @@ describe('UsersService.createWithRole - server-side enforcement', () => {
     };
 
     const moduleRef = await Test.createTestingModule({
-      providers: [UsersService, { provide: PrismaService, useValue: prisma }],
+      providers: [UsersService, { provide: PrismaService, useValue: prisma }, { provide: LoginNameAllocationService, useValue: loginNameAllocationsStub }],
     }).compile();
 
     service = moduleRef.get(UsersService);
@@ -220,7 +224,7 @@ describe('UsersService - Team Lead management', () => {
     };
 
     const moduleRef = await Test.createTestingModule({
-      providers: [UsersService, { provide: PrismaService, useValue: prisma }],
+      providers: [UsersService, { provide: PrismaService, useValue: prisma }, { provide: LoginNameAllocationService, useValue: loginNameAllocationsStub }],
     }).compile();
 
     service = moduleRef.get(UsersService);
@@ -397,7 +401,7 @@ describe('Create Team Lead - confirmPassword', () => {
       });
 
       const moduleRef = await Test.createTestingModule({
-        providers: [UsersService, { provide: PrismaService, useValue: prisma }],
+        providers: [UsersService, { provide: PrismaService, useValue: prisma }, { provide: LoginNameAllocationService, useValue: loginNameAllocationsStub }],
       }).compile();
       service = moduleRef.get(UsersService);
     });
@@ -501,7 +505,7 @@ describe('UsersService.resetPassword', () => {
     };
 
     const moduleRef = await Test.createTestingModule({
-      providers: [UsersService, { provide: PrismaService, useValue: prisma }],
+      providers: [UsersService, { provide: PrismaService, useValue: prisma }, { provide: LoginNameAllocationService, useValue: loginNameAllocationsStub }],
     }).compile();
 
     service = moduleRef.get(UsersService);
@@ -589,7 +593,9 @@ describe('UsersService.changeLoginName', () => {
   let prisma: {
     auditLog: { create: jest.Mock };
     user: { findUnique: jest.Mock; findFirst: jest.Mock; update: jest.Mock };
+    $transaction: jest.Mock;
   };
+  let loginNameAllocations: { reallocate: jest.Mock };
 
   const managerCaller: AuthUser = {
     id: 'manager-1',
@@ -611,16 +617,18 @@ describe('UsersService.changeLoginName', () => {
     isActive: true,
   };
 
-  const coderTarget = { id: 'coder-1', loginName: 'coder.one', role: 'CODER', teamId: 'team-1' };
+  const coderTarget = { id: 'coder-1', loginName: 'coder.one', role: 'CODER', teamId: 'team-1', employeeId: 'EMP0500' };
 
   beforeEach(async () => {
     prisma = {
       auditLog: { create: jest.fn().mockResolvedValue({}) },
       user: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+      $transaction: jest.fn(async (fn: any) => fn(prisma)),
     };
+    loginNameAllocations = { reallocate: jest.fn().mockResolvedValue({}) };
 
     const moduleRef = await Test.createTestingModule({
-      providers: [UsersService, { provide: PrismaService, useValue: prisma }],
+      providers: [UsersService, { provide: PrismaService, useValue: prisma }, { provide: LoginNameAllocationService, useValue: loginNameAllocations }],
     }).compile();
 
     service = moduleRef.get(UsersService);
@@ -680,5 +688,54 @@ describe('UsersService.changeLoginName', () => {
   it('404s for a non-existent user', async () => {
     prisma.user.findUnique.mockResolvedValueOnce(null);
     await expect(service.changeLoginName(managerCaller, 'missing', 'x')).rejects.toThrow(NotFoundException);
+  });
+
+  describe('Phase 9 - Login Name Allocation integration', () => {
+    it('reallocates in the same transaction as the User.loginName update, and never reallocates for a no-op change', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce(coderTarget);
+      const noop = await service.changeLoginName(managerCaller, coderTarget.id, coderTarget.loginName);
+      expect(noop).toEqual({ id: coderTarget.id, loginName: coderTarget.loginName });
+      expect(loginNameAllocations.reallocate).not.toHaveBeenCalled();
+
+      prisma.user.findUnique.mockResolvedValueOnce(coderTarget);
+      prisma.user.findFirst.mockResolvedValueOnce(null);
+      prisma.user.update.mockResolvedValueOnce({ ...coderTarget, loginName: 'renamed' });
+      await service.changeLoginName(managerCaller, coderTarget.id, 'renamed');
+
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(loginNameAllocations.reallocate).toHaveBeenCalledWith(
+        prisma,
+        expect.objectContaining({
+          targetUserId: coderTarget.id,
+          employeeId: coderTarget.employeeId,
+          newLoginName: 'renamed',
+          actor: managerCaller,
+        }),
+      );
+    });
+
+    it('passes an existing transaction through unchanged instead of opening a new one (used by ApprovalsService.approve)', async () => {
+      const tx = { user: prisma.user, auditLog: prisma.auditLog } as any;
+      prisma.user.findUnique.mockResolvedValueOnce(coderTarget);
+      prisma.user.findFirst.mockResolvedValueOnce(null);
+      prisma.user.update.mockResolvedValueOnce({ ...coderTarget, loginName: 'renamed' });
+
+      await service.changeLoginName(managerCaller, coderTarget.id, 'renamed', { tx, reason: 'Approved request req-1' });
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(loginNameAllocations.reallocate).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ newLoginName: 'renamed', reason: 'Approved request req-1' }),
+      );
+    });
+
+    it('rolls back the whole change when reallocate rejects (e.g. a conflicting active allocation)', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce(coderTarget);
+      prisma.user.findFirst.mockResolvedValueOnce(null);
+      prisma.user.update.mockResolvedValueOnce({ ...coderTarget, loginName: 'renamed' });
+      loginNameAllocations.reallocate.mockRejectedValueOnce(new ConflictException('This Login Name already has an active allocation'));
+
+      await expect(service.changeLoginName(managerCaller, coderTarget.id, 'renamed')).rejects.toThrow(ConflictException);
+    });
   });
 });

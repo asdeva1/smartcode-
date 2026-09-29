@@ -72,3 +72,29 @@ Charts Per Hour is derived from configurable inputs (charts, hours, pages, DOS, 
 ## Reporting
 
 Production and Audit reports expose exactly the field sets specified in the brief (Chart ID, Coder, Employee ID, Pages, DOS, ICDs, Status, Coded Date for Production; the equivalent Audit field set including Total Errors) — no additional invented columns, and specifically no JCD column.
+
+## Login Name Allocation & History (Phase 9)
+
+- Login Name is an auditable **allocation identity**, not merely a mutable field on `User`. Every Login Name ever held by every account (Internal/Vendor/TL/Coder/Auditor) is recorded, append-only, in `LoginNameAllocation`.
+- **Invariant, enforced in the database** (PostgreSQL partial unique indexes, not just application code): at most one `ACTIVE` allocation may exist for a given `loginName`, and at most one `ACTIVE` allocation may exist for a given `userId`.
+- Status is one of exactly `ACTIVE`, `DEACTIVATED`, `REALLOCATED` — no other statuses exist.
+- History rows are **never overwritten or deleted**. Reassigning a Login Name closes the existing `ACTIVE` row (`status → REALLOCATED`, `deallocatedAt`/`deallocatedById` set) and creates a new `ACTIVE` row, both inside one database transaction.
+- The existing Login Name change workflow is unchanged and still authoritative: a Team Lead requests a Coder's Login Name change → Manager approval → `UsersService.changeLoginName` applies it. That same call now also reassigns the `LoginNameAllocation` history, in the same transaction as the `User.loginName` update, the `ApprovalRequest` completion, and the audit log entry — if any step fails, the entire change (including the Login Name itself) rolls back, so a Login Name is never changed without its allocation history changing to match, or vice versa.
+- A Manager may search and view current/historical allocations, but cannot reassign a Login Name from the allocation screens directly — reassignment only happens through the approved change workflow above.
+- Historical allocation rows join to the user's **current** organizational placement (vendor/team/team lead) for display — they are not a point-in-time snapshot of the org structure at the time of allocation.
+- Pre-existing accounts (from before Phase 9) are backfilled by a standalone, idempotent script (`apps/api/scripts/backfill-login-name-allocations.ts`), not by the migration itself — this avoids depending on a database-generated UUID function that isn't used anywhere else in this schema. The script is safe to re-run: it skips any user who already has an `ACTIVE` allocation.
+- Backfilled rows leave `allocatedById` **null** rather than attributing the allocation to the account holder themselves or to a fabricated Manager — there is no real historical actor to record for a pre-existing account. This mirrors `AuditLog.userId`, already nullable in this schema for system-origin events. `allocatedById` is nullable for exactly this reason; every allocation a real Manager creates or reallocates always carries a real `allocatedById`. Backfilled rows are explicitly marked via `reason = 'INITIAL_BACKFILL: ...'` and are also logged to `AuditLog` (`action: 'LOGIN_NAME_ALLOCATION_BACKFILLED'`, `userId: null`).
+- Every allocation/reallocation is written to the existing `AuditLog` — there is no separate/parallel audit mechanism for Login Name history.
+
+## Manager Login Name Details (Phase 9)
+
+- Manager-only screen (`/manager/login-name-details`) for searching Login Names by Login Name, Employee ID, Employee Name, or Email, with Role/Vendor/Team/Team Lead/Status filters.
+- Selecting a result shows its current allocation plus its complete history — reachable, but not editable, from this screen.
+
+## Employee Directory (Phase 9)
+
+- Manager-only screen (`/manager/employees`) — a searchable, paginated, enterprise-wide account directory. It is not a CRM/ATS.
+- Columns: EMP-ID, Employee Name, Login Name, Email, Role, Vendor, Team, Team Lead, Active/Inactive, Created Date. There is intentionally no Online/Offline column — no presence/session tracking exists yet in this system, and this phase does not invent placeholder presence data.
+- Search and every filter (Role, Active/Inactive, Vendor, Team, Team Lead) are server-side; the directory is always paginated and the full list is never loaded into the browser at once.
+- The detail view groups fields as Identity (EMP-ID/Name/Email/Login Name), Account (Role/Active-Inactive/Created Date), and Organization (Vendor/Team/Team Lead), plus the employee's Login Name allocation history. Password hashes, reset tokens, and access/refresh tokens are never returned by the API and never rendered.
+- Enforced server-side for Manager only (route-level `@Roles('MANAGER')` guard on both `manager/login-name-allocations` and `manager/employees`) — hiding the nav entry for other roles is a convenience, not the security boundary.

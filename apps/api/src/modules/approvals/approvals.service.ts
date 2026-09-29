@@ -150,23 +150,37 @@ export class ApprovalsService {
     return request;
   }
 
-  /** Manager approves: applies the change, then marks the request APPROVED. */
+  /**
+   * Manager approves: applies the change, then marks the request
+   * APPROVED - all in ONE transaction (docs/09-BUSINESS-RULES.md section
+   * 10 / Phase 9), so a LOGIN_NAME_CHANGE approval can never leave
+   * User.loginName changed while the ApprovalRequest is still PENDING, or
+   * vice versa. If the change itself fails (e.g. a conflicting Login
+   * Name), the whole approval rolls back and the request stays PENDING.
+   */
   async approve(caller: AuthUser, id: string) {
     const request = await this.loadPending(caller, id);
 
-    if (request.type === 'LOGIN_NAME_CHANGE') {
-      const payload = request.payload as unknown as LoginNameChangePayload;
-      await this.users.changeLoginName(caller, request.targetUserId, payload.requestedLoginName);
-    }
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (request.type === 'LOGIN_NAME_CHANGE') {
+        const payload = request.payload as unknown as LoginNameChangePayload;
+        await this.users.changeLoginName(caller, request.targetUserId, payload.requestedLoginName, {
+          tx,
+          reason: `Approved Login Name change request ${id}`,
+        });
+      }
 
-    const updated = await this.prisma.approvalRequest.update({
-      where: { id },
-      data: { status: 'APPROVED', reviewedById: caller.id, reviewedAt: new Date() },
-      include: APPROVAL_INCLUDE,
+      const row = await tx.approvalRequest.update({
+        where: { id },
+        data: { status: 'APPROVED', reviewedById: caller.id, reviewedAt: new Date() },
+        include: APPROVAL_INCLUDE,
+      });
+      await writeAuditLog(tx, caller, 'APPROVAL_APPROVED', 'ApprovalRequest', id, {
+        after: { type: request.type },
+      });
+      return row;
     });
-    await writeAuditLog(this.prisma, caller, 'APPROVAL_APPROVED', 'ApprovalRequest', id, {
-      after: { type: request.type },
-    });
+
     return toDto(updated);
   }
 

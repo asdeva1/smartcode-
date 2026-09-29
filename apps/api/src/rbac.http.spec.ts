@@ -103,6 +103,11 @@ const ROUTES: { method: Method; path: string; allowed: Role[] }[] = [
   { method: 'get', path: '/api/manager/password-reset-requests', allowed: ['MANAGER'] },
   { method: 'patch', path: `/api/manager/password-reset-requests/${ID}/approve`, allowed: ['MANAGER'] },
   { method: 'patch', path: `/api/manager/password-reset-requests/${ID}/reject`, allowed: ['MANAGER'] },
+  // Login Name Details + Employee Directory (Phase 9) - Manager only
+  { method: 'get', path: '/api/manager/login-name-allocations', allowed: ['MANAGER'] },
+  { method: 'get', path: '/api/manager/login-name-allocations/coder.one', allowed: ['MANAGER'] },
+  { method: 'get', path: '/api/manager/employees', allowed: ['MANAGER'] },
+  { method: 'get', path: `/api/manager/employees/${ID}`, allowed: ['MANAGER'] },
   // Public - no @Roles at all, so every authenticated role passes RolesGuard
   // trivially; the route itself is also reachable with no token at all
   // (see the dedicated "public and does not leak" tests below).

@@ -27,7 +27,7 @@ beforeEach(() => {
 
 describe('Role-specific navigation (Phase 10)', () => {
   it('matches the required menu for every role, in order', () => {
-    expect(labels('MANAGER')).toEqual(['Dashboard', 'Vendors', 'Team Leads', 'Auditors', 'Teams', 'Projects', 'Charts', 'Production', 'Audits', 'Reports', 'Activity Logs', 'Audit Logs', 'Approvals', 'Password Reset Requests', 'Settings']);
+    expect(labels('MANAGER')).toEqual(['Dashboard', 'Vendors', 'Team Leads', 'Auditors', 'Teams', 'Projects', 'Charts', 'Production', 'Audits', 'Reports', 'Activity Logs', 'Audit Logs', 'Approvals', 'Password Reset Requests', 'Login Name Details', 'Employee Directory', 'Settings']);
     expect(labels('VENDOR')).toEqual(['Dashboard', 'Team Leads', 'Auditors', 'Coders', 'Teams', 'Charts', 'Production', 'Audits', 'Rework', 'Reports']);
     expect(labels('TEAM_LEAD')).toEqual(['Dashboard', 'Team', 'Coders', 'Production', 'Charts', 'Audits', 'Rework', 'Reports', 'Productivity']);
     expect(labels('AUDITOR')).toEqual(['Dashboard', 'Audit Queue', 'Charts', 'Audits', 'Rework', 'Reports']);

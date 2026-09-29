@@ -16,3 +16,5 @@ export * from './schemas/rework';
 export * from './schemas/notification';
 export * from './schemas/approval';
 export * from './schemas/password-reset';
+export * from './schemas/login-name-allocation';
+export * from './schemas/employee';

@@ -5,6 +5,7 @@ import { CodersService } from './coders.service';
 import { UsersService } from './users.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ExportService } from '../../common/export/export.service';
+import { LoginNameAllocationService } from '../login-name-allocations/login-name-allocation.service';
 
 const TEAM = 'team-1';
 const teamLead: AuthUser = { id: 'tl-1', employeeId: 'E1', loginName: 'tl.one', email: 'tl@x.local', role: 'TEAM_LEAD', teamId: TEAM, isActive: true };
@@ -47,7 +48,17 @@ describe('CodersService (Team Lead coder management)', () => {
       $transaction: jest.fn(async (fn: any) => fn(tx)),
     };
     const moduleRef = await Test.createTestingModule({
-      providers: [CodersService, UsersService, ExportService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        CodersService,
+        UsersService,
+        ExportService,
+        { provide: PrismaService, useValue: prisma },
+        // These CodersService tests only exercise UsersService.createCoder /
+        // setActive, never changeLoginName, so a plain never-called stub is
+        // enough - Nest still needs the token registered to resolve
+        // UsersService's constructor at all (Phase 9 added this dependency).
+        { provide: LoginNameAllocationService, useValue: { reallocate: jest.fn() } },
+      ],
     }).compile();
     service = moduleRef.get(CodersService);
     users = moduleRef.get(UsersService);

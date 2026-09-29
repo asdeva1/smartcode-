@@ -1,6 +1,8 @@
 import { Injectable, ForbiddenException, ConflictException, NotFoundException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { canCreateRole, type AuthUser, type Role } from '@smartcode/types';
 import { PrismaService } from '../../prisma/prisma.service';
+import { LoginNameAllocationService } from '../login-name-allocations/login-name-allocation.service';
 import { LocalAuthProvider } from '../auth/providers/local-auth.provider';
 import { CreateUserDto } from './dto/create-user.dto';
 import { CreateTeamLeadDto } from './dto/create-team-lead.dto';
@@ -23,7 +25,10 @@ const ACTIVE_VENDOR_INCLUDE = {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly loginNameAllocations: LoginNameAllocationService,
+  ) {}
 
   /**
    * Hierarchy-enforced creation — docs/03-RBAC-PERMISSIONS.md
@@ -281,33 +286,60 @@ export class UsersService {
   }
 
   /**
-   * Login Name change (docs/09-BUSINESS-RULES.md section 8/9). Manager
+   * Login Name change (docs/09-BUSINESS-RULES.md section 8/9/10). Manager
    * changes it directly; a Team Lead may only REQUEST a change for their
-   * own-team Coder (see ApprovalsService for the request/approve path).
-   * Preserves the User row (id, history, ProductionEntry/AuditEntry
-   * ownership) - only the loginName column changes.
+   * own-team Coder (see ApprovalsService for the request/approve path,
+   * which passes `opts.tx` so the ApprovalRequest status update commits
+   * or rolls back together with everything here). Preserves the User row
+   * (id, history, ProductionEntry/AuditEntry ownership) - only the
+   * loginName column changes.
+   *
+   * Phase 9: also closes the target's current LoginNameAllocation (if
+   * any) and opens a new one, in the SAME transaction as the
+   * User.loginName update itself - never one without the other. When no
+   * `opts.tx` is supplied (the direct Manager route), this method opens
+   * its own transaction; ApprovalsService.approve instead passes its own
+   * `tx` so its ApprovalRequest.status update is part of the same commit.
    */
-  async changeLoginName(caller: AuthUser, targetId: string, newLoginName: string) {
+  async changeLoginName(
+    caller: AuthUser,
+    targetId: string,
+    newLoginName: string,
+    opts: { tx?: Prisma.TransactionClient; reason?: string } = {},
+  ): Promise<{ id: string; loginName: string }> {
     if (caller.role !== 'MANAGER') {
       throw new ForbiddenException('Only a Manager can change a Login Name directly');
     }
-    const target = await this.prisma.user.findUnique({ where: { id: targetId } });
-    if (!target) throw new NotFoundException('User not found');
-    if (target.role === 'MANAGER' && target.id !== caller.id) {
-      throw new ForbiddenException('Cannot change another Manager\'s Login Name');
-    }
-    const loginName = newLoginName.trim();
-    if (loginName === target.loginName) return { id: targetId, loginName };
 
-    const conflict = await this.prisma.user.findFirst({ where: { loginName, id: { not: targetId } } });
-    if (conflict) throw new ConflictException('This Login Name is already taken');
+    const run = async (db: PrismaService | Prisma.TransactionClient) => {
+      const target = await db.user.findUnique({ where: { id: targetId } });
+      if (!target) throw new NotFoundException('User not found');
+      if (target.role === 'MANAGER' && target.id !== caller.id) {
+        throw new ForbiddenException('Cannot change another Manager\'s Login Name');
+      }
+      const loginName = newLoginName.trim();
+      if (loginName === target.loginName) return { id: targetId, loginName };
 
-    const updated = await this.prisma.user.update({ where: { id: targetId }, data: { loginName } });
-    await writeAuditLog(this.prisma, caller, 'LOGIN_NAME_CHANGED', 'User', targetId, {
-      before: { loginName: target.loginName },
-      after: { loginName: updated.loginName },
-    });
-    return { id: targetId, loginName: updated.loginName };
+      const conflict = await db.user.findFirst({ where: { loginName, id: { not: targetId } } });
+      if (conflict) throw new ConflictException('This Login Name is already taken');
+
+      const updated = await db.user.update({ where: { id: targetId }, data: { loginName } });
+      await writeAuditLog(db, caller, 'LOGIN_NAME_CHANGED', 'User', targetId, {
+        before: { loginName: target.loginName },
+        after: { loginName: updated.loginName },
+      });
+      await this.loginNameAllocations.reallocate(db, {
+        targetUserId: targetId,
+        employeeId: target.employeeId,
+        newLoginName: loginName,
+        actor: caller,
+        reason: opts.reason,
+      });
+      return { id: targetId, loginName: updated.loginName };
+    };
+
+    if (opts.tx) return run(opts.tx);
+    return this.prisma.$transaction((tx) => run(tx));
   }
 
   /**

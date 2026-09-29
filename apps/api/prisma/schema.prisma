@@ -127,6 +127,15 @@ model User {
   passwordResetRequestsReviewed  PasswordResetRequest[] @relation("PasswordResetReviewedBy")
   passwordResetTokens            PasswordResetToken[]   @relation("PasswordResetTokenUser")
 
+  // Login Name Allocation history (docs/09-BUSINESS-RULES.md section 10 /
+  // Phase 9) - append-only record of every Login Name this user has ever
+  // held. `loginNameAllocations` is this user's own history;
+  // `loginNameAllocationsGranted`/`loginNameAllocationsRevoked` are the
+  // Manager-side "who allocated/deallocated" audit trail.
+  loginNameAllocations         LoginNameAllocation[] @relation("LoginNameAllocationUser")
+  loginNameAllocationsGranted  LoginNameAllocation[] @relation("LoginNameAllocationAllocatedBy")
+  loginNameAllocationsRevoked  LoginNameAllocation[] @relation("LoginNameAllocationDeallocatedBy")
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -608,4 +617,84 @@ model PasswordResetToken {
 
   @@index([userId])
   @@index([requestId])
+}
+
+// Login Name Allocation history (docs/09-BUSINESS-RULES.md section 10 /
+// Phase 9). A Login Name is an auditable ALLOCATION identity, not just a
+// mutable User column: SmartCode must be able to say, for any Login Name,
+// who holds it now, who held it before, and exactly when it changed
+// hands - this model is that append-only ledger. User.loginName remains
+// the single source of truth for authentication (unchanged); this table
+// only ever gains rows, it never drives login itself.
+//
+// INVARIANTS (enforced at the database level, not just in the service
+// layer - see this model's migration for the two PARTIAL UNIQUE INDEXES
+// Prisma's schema DSL cannot express directly):
+//   1. At most one ACTIVE allocation per loginName at any time.
+//   2. At most one ACTIVE allocation per userId at any time.
+// Reassignment NEVER updates or deletes a row: the old ACTIVE row is
+// closed out (status -> REALLOCATED, deallocatedAt/deallocatedById set)
+// and a brand-new ACTIVE row is created, in one transaction alongside the
+// User.loginName update itself - see LoginNameAllocationService.reallocate
+// and UsersService.changeLoginName.
+//
+// Deliberately does NOT snapshot the user's role/vendor/team/team-lead at
+// allocation time (only `employeeId`, which is itself a stable identity,
+// is kept alongside `loginName`) - the spec's minimum field list does not
+// call for point-in-time org snapshots, so Login Name Details/Employee
+// Directory join to the user's CURRENT organizational placement. A
+// historical row's loginName + employeeId is enough to identify exactly
+// who held it and when; only the "where were they placed at the time"
+// detail is not preserved, and is disclosed as a known limitation.
+enum LoginNameAllocationStatus {
+  ACTIVE
+  DEACTIVATED
+  REALLOCATED
+}
+
+model LoginNameAllocation {
+  id String @id @default(uuid())
+
+  loginName String
+  userId    String
+  user      User   @relation("LoginNameAllocationUser", fields: [userId], references: [id])
+
+  // Kept alongside loginName/userId (rather than looked up live from
+  // User) so a historical row always identifies who it belonged to even
+  // if the User row's own employeeId were ever changed later.
+  employeeId String
+
+  status LoginNameAllocationStatus @default(ACTIVE)
+
+  allocatedAt   DateTime  @default(now())
+  deallocatedAt DateTime?
+
+  // Nullable, mirroring AuditLog.userId's own established "no human actor
+  // recorded" convention (see AuditLog model above) - never falsely
+  // attributed to the account holder themselves and never a fabricated
+  // Manager. Null only for pre-Phase-9 accounts created by the one-time
+  // backfill (apps/api/scripts/backfill-login-name-allocations.ts), whose
+  // `reason` field explicitly marks them as an INITIAL_BACKFILL,
+  // system-origin allocation. Every allocation a real Manager creates or
+  // reallocates through UsersService.changeLoginName /
+  // ApprovalsService.approve always has a real allocatedById.
+  allocatedById String?
+  allocatedBy   User?   @relation("LoginNameAllocationAllocatedBy", fields: [allocatedById], references: [id])
+
+  deallocatedById String?
+  deallocatedBy   User?   @relation("LoginNameAllocationDeallocatedBy", fields: [deallocatedById], references: [id])
+
+  reason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Non-unique indexes for query performance (search/filter/history
+  // lookups) - the two UNIQUE, PARTIAL (WHERE status = 'ACTIVE') indexes
+  // that actually enforce the "one ACTIVE per loginName"/"one ACTIVE per
+  // userId" invariants live in this model's migration.sql, since Prisma's
+  // schema DSL has no syntax for a partial index.
+  @@index([loginName])
+  @@index([userId])
+  @@index([status])
 }

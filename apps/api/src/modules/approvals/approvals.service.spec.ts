@@ -18,6 +18,7 @@ describe('ApprovalsService', () => {
     approvalRequest: { create: jest.Mock; findFirst: jest.Mock; findMany: jest.Mock; findUnique: jest.Mock; count: jest.Mock; update: jest.Mock };
     user: { findUnique: jest.Mock; findFirst: jest.Mock; update: jest.Mock };
     auditLog: { create: jest.Mock };
+    $transaction: jest.Mock;
   };
   let users: { changeLoginName: jest.Mock };
 
@@ -73,6 +74,7 @@ describe('ApprovalsService', () => {
       },
       user: { findUnique: jest.fn(), findFirst: jest.fn().mockResolvedValue(null), update: jest.fn() },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
+      $transaction: jest.fn(async (fn: any) => fn(prisma)),
     };
     users = { changeLoginName: jest.fn().mockResolvedValue({ id: coderTarget.id, loginName: 'coder.renamed' }) };
 
@@ -202,7 +204,13 @@ describe('ApprovalsService', () => {
 
       const result = await service.approve(managerCaller, 'req-1');
 
-      expect(users.changeLoginName).toHaveBeenCalledWith(managerCaller, coderTarget.id, 'coder.renamed');
+      expect(users.changeLoginName).toHaveBeenCalledWith(
+        managerCaller,
+        coderTarget.id,
+        'coder.renamed',
+        expect.objectContaining({ tx: prisma }),
+      );
+      expect(prisma.$transaction).toHaveBeenCalled();
       expect(result.status).toBe('APPROVED');
       expect(prisma.auditLog.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ action: 'APPROVAL_APPROVED' }) }),
