@@ -35,6 +35,18 @@ describe('Project auto-assignment: Manager -> Project -> Team Lead -> every acti
       vendorAssignment: { findFirst: jest.fn().mockResolvedValue(null) },
       auditorProjectAssignment: { findMany: jest.fn().mockResolvedValue([]) },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
+      // ProjectsService.updateProject() now wraps a team-changing assignment
+      // in a Prisma transaction (Phase 10A ProjectTeamAssignment history) via
+      // closeAndOpenTeamAssignment(), which reads/writes
+      // projectTeamAssignment and calls tx.project.update - $transaction
+      // here runs the callback against this same `prisma` object (tx ===
+      // prisma), matching the pattern used elsewhere in this codebase.
+      projectTeamAssignment: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'pta-1' }),
+        update: jest.fn(),
+      },
+      $transaction: jest.fn((cb: (tx: unknown) => unknown) => cb(prisma)),
     };
     const moduleRef = await Test.createTestingModule({ providers: [ProjectsService, { provide: PrismaService, useValue: prisma }] }).compile();
     projects = moduleRef.get(ProjectsService);
@@ -48,9 +60,14 @@ describe('Project auto-assignment: Manager -> Project -> Team Lead -> every acti
     // Running the exact same assignment again is a no-op update, not a second row -
     // there is no assignment table to accumulate duplicates in.
     const crossVendorChecksAfterFirstAssign = prisma.auditorProjectAssignment.findMany.mock.calls.length;
+    const projectUpdateCallsAfterFirstAssign = prisma.project.update.mock.calls.length;
     prisma.project.findUnique.mockResolvedValueOnce({ id: 'p-001', teamId: TEAM });
     await projects.updateProject(manager, 'p-001', { teamId: TEAM } as any);
-    expect(prisma.project.update).toHaveBeenCalledTimes(2);
+    // The repeat call's team is unchanged, so it skips
+    // closeAndOpenTeamAssignment (and therefore its own internal
+    // tx.project.update call) entirely - only updateProject's own single
+    // tx.project.update call happens this time, one more than before.
+    expect(prisma.project.update.mock.calls.length).toBe(projectUpdateCallsAfterFirstAssign + 1);
     // Team unchanged on the repeat call -> the cross-vendor re-check is skipped entirely, not re-run.
     expect(prisma.auditorProjectAssignment.findMany.mock.calls.length).toBe(crossVendorChecksAfterFirstAssign);
   });
@@ -85,15 +102,23 @@ describe('Project auto-assignment: Manager -> Project -> Team Lead -> every acti
       vendorAssignment: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn(async ({ data }: any) => ({ id: 'asg', assignedAt: new Date(), ...data })) },
       user: {
         findUnique: jest.fn().mockResolvedValue({ id: 'tl-01', role: 'TEAM_LEAD', isActive: true, fullName: 'TL 01', loginName: 'tl01', leadsTeam: { id: TEAM, projects: [] } }),
+        // Coder 5 (created via the Vendor Portal) is the sole active Coder
+        // under this vendor at cascade time.
+        findMany: jest.fn().mockResolvedValue([{ id: 'coder-5', teamId: null }]),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       team: { create: jest.fn() },
       auditorProjectAssignment: { findMany: jest.fn().mockResolvedValue([]) },
+      // Same TeamMembership-ledger transaction wiring as ProjectsService's
+      // own $transaction above (tx === vendorPrisma).
+      $transaction: jest.fn((cb: (tx: unknown) => unknown) => cb(vendorPrisma)),
+      teamMembership: { updateMany: jest.fn().mockResolvedValue({ count: 0 }), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
     const vendors = new VendorsService(vendorPrisma, {} as any);
     await vendors.assignTeamLead(manager, V, 'tl-01');
-    expect(vendorPrisma.user.updateMany.mock.calls[0][0]).toEqual({ where: { role: 'CODER', vendorId: V, isActive: true }, data: { teamId: TEAM } });
+    expect(vendorPrisma.user.findMany.mock.calls[0][0].where).toEqual({ role: 'CODER', vendorId: V, isActive: true });
+    expect(vendorPrisma.user.updateMany.mock.calls[0][0]).toEqual({ where: { id: { in: ['coder-5'] } }, data: { teamId: TEAM } });
 
     // With teamId=TEAM now set (by the cascade above), Coder 5 sees Project 001 - the same
     // derivation every other Coder on the team uses; no vendor-specific project logic exists.

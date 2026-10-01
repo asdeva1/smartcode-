@@ -136,6 +136,38 @@ model User {
   loginNameAllocationsGranted  LoginNameAllocation[] @relation("LoginNameAllocationAllocatedBy")
   loginNameAllocationsRevoked  LoginNameAllocation[] @relation("LoginNameAllocationDeallocatedBy")
 
+  // Phase 10A/10B — Project<->Team assignment history and client chart
+  // import provenance (docs/09-BUSINESS-RULES.md section 11).
+  projectTeamAssignmentsMade   ProjectTeamAssignment[]      @relation("ProjectTeamAssignedBy")
+  projectTeamAssignmentsRemoved ProjectTeamAssignment[]     @relation("ProjectTeamUnassignedBy")
+  chartImportsMade             ChartImport[]                @relation("ChartImportImportedBy")
+  chartImportTemplatesCreated  ChartImportTemplateVersion[] @relation("ChartImportTemplateCreatedBy")
+
+  // Organization Assignment / Auto-Visibility requirement — append-only
+  // Coder<->Team membership ledger (see TeamMembership below).
+  // "AsCoder" is a Coder's own membership history; the rest are the
+  // Team-Lead/Manager-side "who assigned/ended it" audit trail, mirroring
+  // the ChartAllocation actor-relation pattern above.
+  teamMembershipsAsCoder   TeamMembership[] @relation("TeamMembershipCoder")
+  teamMembershipsAssigned  TeamMembership[] @relation("TeamMembershipAssignedBy")
+  teamMembershipsEnded     TeamMembership[] @relation("TeamMembershipEndedBy")
+
+  // Same requirement — AuditorProjectAssignment gains a soft-delete "who
+  // removed it" actor column (see that model below); this is the
+  // Manager-side audit trail of who ended an Auditor's Project assignment.
+  auditorProjectAssignmentsRemoved AuditorProjectAssignment[] @relation("AuditorProjectAssignmentRemovedBy")
+
+  // Phase 10D — Chart Allocation ledger (docs/09-BUSINESS-RULES.md section
+  // 12). "AsCoder" is a Coder's own allocation history; the rest are the
+  // Team-Lead/Manager-side audit trail of who allocated/ended/imported.
+  chartAllocationsAsCoder    ChartAllocation[]       @relation("ChartAllocationCoder")
+  chartAllocationsAsTeamLead ChartAllocation[]       @relation("ChartAllocationTeamLead")
+  chartAllocationsAssigned   ChartAllocation[]       @relation("ChartAllocationAssignedBy")
+  chartAllocationsEnded      ChartAllocation[]       @relation("ChartAllocationEndedBy")
+  chartAllocationImportsMade ChartAllocationImport[] @relation("ChartAllocationImportedBy")
+  chartsCurrentlyAssigned    Chart[]                 @relation("ChartCurrentCoder")
+  chartsCurrentAssignedBy    Chart[]                 @relation("ChartCurrentAssignedBy")
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -166,6 +198,51 @@ model Team {
   projects    Project[]
   reworks     Rework[]
   createdAt   DateTime  @default(now())
+
+  projectAssignments ProjectTeamAssignment[]
+  chartAllocations   ChartAllocation[]
+  memberships        TeamMembership[]
+}
+
+// Organization Assignment / Auto-Visibility requirement ("FINAL ORGANIZATION
+// ASSIGNMENT + AUTO-VISIBILITY REQUIREMENT" section 1/9/11) — append-only
+// history of which Team a Coder has belonged to, on top of the
+// pre-existing User.teamId scalar. User.teamId is KEPT UNCHANGED and
+// remains the single "current team" pointer every existing scope helper
+// (chartScope/productionScope/etc.) and RBAC check reads - this table only
+// ever ADDS a parallel, queryable membership history, mirroring the exact
+// same pattern already used by ProjectTeamAssignment/VendorAssignment/
+// ChartAllocation above. A partial unique index (see this model's
+// migration - Prisma's schema DSL cannot express it) allows at most one
+// ACTIVE membership per Coder, matching User.teamId's own "one team at a
+// time" semantics - the same invariant, just made historically queryable
+// and giving a Team Lead's "Relieve from Team" action a real row to close
+// out rather than only clearing a scalar.
+enum TeamMembershipEndReason {
+  RELIEVED   // Team Lead's explicit "Relieve from Team" / "Release from Team" action.
+  REASSIGNED // Coder moved onto a different Team (Manager reassignment, or the
+             // Vendor -> Team Lead -> Coder cascade in VendorsService#assignTeamLead).
+}
+
+model TeamMembership {
+  id     String @id @default(uuid())
+  coderId String
+  coder   User   @relation("TeamMembershipCoder", fields: [coderId], references: [id])
+  teamId  String
+  team    Team   @relation(fields: [teamId], references: [id])
+
+  isActive     Boolean  @default(true)
+  assignedAt   DateTime @default(now())
+  assignedById String?
+  assignedBy   User?    @relation("TeamMembershipAssignedBy", fields: [assignedById], references: [id])
+
+  endedAt   DateTime?
+  endedById String?
+  endedBy   User?                    @relation("TeamMembershipEndedBy", fields: [endedById], references: [id])
+  endReason TeamMembershipEndReason?
+
+  @@index([coderId, isActive])
+  @@index([teamId, isActive])
 }
 
 model Client {
@@ -175,22 +252,103 @@ model Client {
   projects Project[]
 }
 
-model Project {
-  id       String   @id @default(uuid())
-  clientId String
-  client   Client   @relation(fields: [clientId], references: [id])
-  teamId   String?
-  team     Team?    @relation(fields: [teamId], references: [id])
-  name     String
-  isActive Boolean  @default(true)
+// Phase 10A: how a Project acquires its Charts. MANUAL = client-file-driven
+// (see ChartImport below) - Charts are created by a Manager import, then
+// distributed by the future Phase 10D Team-Lead-Summary-upload workflow.
+// AUTOMATIC = today's existing (pre-Phase-10) behaviour: a Coder enters a
+// Chart ID/Page Count directly in Production and the Chart is auto-created
+// on first submission (see ProductionService.create) - completely
+// unchanged by this phase.
+//
+// DEFAULT FOR EXISTING ROWS - this is a FACT, sourced below, not a guess:
+// MANUAL did not exist as a concept before this migration, so AUTOMATIC is
+// the only value that can be historically true of every pre-Phase-10
+// Project - there is no ambiguity to resolve and nothing is being "silently
+// converted". PROOF: `apps/api/src/modules/production/production.service.ts`
+// (`if (!chart) await tx.chart.create(...)`) is, as of this migration, the
+// ONLY Chart-creation code path that ever existed prior to this phase's own
+// new ChartImportsService.commit (a repo-wide grep for chart.create/
+// createMany/upsert confirms exactly these two call sites). That path is
+// unconditional - it never branched on any project-level flag, because none
+// existed - so every Chart on every existing Project was necessarily
+// created by it. The migration backfills every existing row to AUTOMATIC
+// explicitly (`NOT NULL DEFAULT 'AUTOMATIC'` - see this enum's
+// migration.sql for the full sourced explanation), not merely relying on an
+// unexplained schema default, and every current project's runtime
+// behaviour is byte-for-byte identical after the migration (see "Chart
+// Assignment" in docs/09-BUSINESS-RULES.md). AUTOMATIC is also the default
+// applied to any newly-created Project that does not explicitly opt into
+// MANUAL.
+enum ProjectAllocationType {
+  MANUAL
+  AUTOMATIC
+}
 
-  charts               Chart[]
-  auditorAssignments   AuditorProjectAssignment[]
-  reworks              Rework[]
+model Project {
+  id             String                @id @default(uuid())
+  clientId       String
+  client         Client                @relation(fields: [clientId], references: [id])
+  teamId         String?
+  team           Team?                 @relation(fields: [teamId], references: [id])
+  name           String
+  isActive       Boolean               @default(true)
+  allocationType ProjectAllocationType @default(AUTOMATIC)
+
+  charts              Chart[]
+  auditorAssignments  AuditorProjectAssignment[]
+  reworks             Rework[]
+  teamAssignments     ProjectTeamAssignment[]
+  chartImports        ChartImport[]
+  // One Template per Project (see ChartImportTemplate below), created
+  // lazily on that Project's first successful chart import.
+  chartImportTemplate ChartImportTemplate?
+  // Phase 10D — Manager Summary export / Team Lead allocation upload.
+  chartAllocations       ChartAllocation[]
+  chartAllocationImports ChartAllocationImport[]
+}
+
+// Phase 10A: append-only history of which Team has worked a Project, on
+// top of the pre-existing Project.teamId scalar. Project.teamId is KEPT
+// UNCHANGED and continues to be the single "current team" pointer every
+// existing scope helper (chartScope/productionScope/auditScope/etc.) reads
+// - this table only ever ADDS a parallel, queryable history of every
+// assign/unassign transition, mirroring the VendorAssignment pattern
+// above. A partial unique index (see this model's migration - Prisma's
+// schema DSL cannot express it) allows at most one ACTIVE assignment per
+// Project, matching Project.teamId's own "one team at a time" semantics.
+model ProjectTeamAssignment {
+  id             String    @id @default(uuid())
+  projectId      String
+  project        Project   @relation(fields: [projectId], references: [id])
+  teamId         String
+  team           Team      @relation(fields: [teamId], references: [id])
+  isActive       Boolean   @default(true)
+  assignedAt     DateTime  @default(now())
+  assignedById   String?
+  assignedBy     User?     @relation("ProjectTeamAssignedBy", fields: [assignedById], references: [id])
+  unassignedAt   DateTime?
+  unassignedById String?
+  unassignedBy   User?     @relation("ProjectTeamUnassignedBy", fields: [unassignedById], references: [id])
+
+  @@index([projectId, isActive])
+  @@index([teamId, isActive])
 }
 
 // Question 6 (docs/11-SCHEMA-DECISIONS.md) — Auditor scoped to Project(s),
 // not to individually assigned charts.
+//
+// Organization Assignment / Auto-Visibility requirement section 13 - this
+// used to be delete-on-unassign (ProjectsService#deleteAssignment ran a
+// real DELETE), which lost history the moment an Auditor was unassigned.
+// Additive, minimum-necessary fix: isActive/removedAt/removedById turn
+// unassignment into a soft-delete (same shape as VendorAssignment/
+// ProjectTeamAssignment above), so "historical assignments remain intact"
+// holds for Auditors too. The old `@@unique([auditorId, projectId])` - which
+// only worked because a delete freed the pair for reuse - is replaced by a
+// partial unique index (see this table's migration; Prisma's schema DSL
+// cannot express a partial index) allowing at most one ACTIVE assignment
+// per (auditorId, projectId), so the same pair can be assigned, ended, and
+// re-assigned later without ever losing the earlier row.
 model AuditorProjectAssignment {
   id         String   @id @default(uuid())
   auditorId  String
@@ -199,7 +357,13 @@ model AuditorProjectAssignment {
   project    Project  @relation(fields: [projectId], references: [id])
   assignedAt DateTime @default(now())
 
-  @@unique([auditorId, projectId])
+  isActive    Boolean   @default(true)
+  removedAt   DateTime?
+  removedById String?
+  removedBy   User?     @relation("AuditorProjectAssignmentRemovedBy", fields: [removedById], references: [id])
+
+  @@index([auditorId, isActive])
+  @@index([projectId, isActive])
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -223,6 +387,7 @@ model Vendor {
 
   accounts     User[]             @relation("VendorAccounts")
   assignments  VendorAssignment[]
+  chartAllocations ChartAllocation[]
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -278,18 +443,345 @@ model Chart {
   projectId       String
   project         Project  @relation(fields: [projectId], references: [id])
 
-  // Reserved for future formal chart-assignment workflow — see
-  // docs/11-SCHEMA-DECISIONS.md Question 5. Unused by v1 business logic
-  // (v1 uses direct Coder entry, Chart auto-created on first submission).
+  // Phase 10D: the current-assignment convenience pointer these three
+  // fields were reserved for since Phase 10A-10B (see
+  // docs/11-SCHEMA-DECISIONS.md Question 5) - now wired up. This mirrors
+  // sourceImportId's own role below: a cheap "who/when is this chart
+  // assigned to right now" read, refreshed by every allocate/pullback/
+  // reassign, but NEVER the source of truth for history - that is the
+  // ChartAllocation ledger (see below). Null means "not currently
+  // allocated" (never allocated yet, or pulled back and not reassigned).
   assignedCoderId String?
+  assignedCoder   User?     @relation("ChartCurrentCoder", fields: [assignedCoderId], references: [id])
   assignedById    String?
+  assignedByUser  User?     @relation("ChartCurrentAssignedBy", fields: [assignedById], references: [id])
   assignedAt      DateTime?
+
+  allocations ChartAllocation[]
+
+  // Phase 10A-10B (CORRECTED per architecture review): a pointer only, not
+  // a copy of client data. The client-provided attribute VALUES (PageCount,
+  // PageBucket, textbox9, EventTypeName2, High_Level_Status) are
+  // deliberately NOT stored on Chart - they live in ChartImportRow below,
+  // one new row per import that ever touches this ChartID, so:
+  //   - a re-import of an already-imported ChartID NEVER overwrites or
+  //     destroys a prior import's source values - every version is kept;
+  //   - a Chart with real ProductionEntry/AuditEntry/Rework history is
+  //     NEVER mutated by a later re-import - only a brand-new
+  //     ChartImportRow is appended and this pointer is refreshed;
+  //   - "where did this ChartID's data come from" is always answerable by
+  //     walking ChartImportRow, never by trusting a single overwritten
+  //     value on Chart itself.
+  // sourceImportId is refreshed, each (re-)import, to point at the most
+  // recent ChartImport that touched this Chart - a cheap, non-destructive
+  // "current provenance" convenience pointer only; it is never the source
+  // of truth for historical values (ChartImportRow is), and touching it
+  // never writes to ProductionEntry/AuditEntry/Rework.
+  sourceImportId String?
+  sourceImport   ChartImport? @relation(fields: [sourceImportId], references: [id])
 
   productionEntries ProductionEntry[]
   reworks           Rework[]
+  importRows        ChartImportRow[]
   createdAt         DateTime @default(now())
 
   @@index([assignedCoderId])
+  @@index([sourceImportId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 10A-10B — Client File Driven Chart Import Foundation
+// ─────────────────────────────────────────────────────────────
+// See docs/09-BUSINESS-RULES.md section 11. The client sends a CSV/Excel
+// file (the "Raw" sheet of their Allocation workbook); a Manager imports
+// it into a MANUAL-allocation-type Project, which creates/updates real
+// Chart rows. This is ONLY the import foundation - the later Team-Lead
+// Summary-upload workflow ("Assigned to" -> Login Name -> Coder Production
+// Space) is explicitly Phase 10D and is NOT implemented by these models.
+//
+// CORRECTED ARCHITECTURE (post-review): the intended lineage is
+// Project -> Template -> TemplateVersion -> Import -> ImportRow -> Chart.
+// A prior draft collapsed Template into TemplateVersion directly under
+// Project; that has been undone below - ChartImportTemplate is now its own
+// row (one per Project, created lazily on first import) and
+// ChartImportTemplateVersion belongs to IT, not directly to Project. A new
+// ChartImportRow model (also new, replacing the fields a prior draft had
+// added straight onto Chart) is the actual source-of-truth for every
+// imported row's client-provided values, keyed by (import, chart) - never
+// updated in place, always inserted fresh, so full historical source data
+// survives any number of repeated imports of the same ChartID.
+
+enum ChartImportFileType {
+  CSV
+  XLSX
+}
+
+// PROCESSING is deliberately not a member of this enum: a commit's Chart/
+// ChartImportRow writes (batched internally, up to CHART_IMPORT_MAX_ROWS
+// per file) all happen inside ONE database transaction (see
+// ChartImportsService.commit), so there is no intermediate state a client
+// could ever observe between PENDING and the transaction's own resolution
+// to COMPLETED or (on rollback) a separately-written FAILED row - adding a
+// status nothing can ever read would be speculative, not descriptive.
+enum ChartImportStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REJECTED
+}
+
+// One Template per Project, created lazily on that Project's first
+// successful import. Kept as its own row (not collapsed into
+// TemplateVersion) so "the template identity for this project" and "one
+// version of it" are two distinct, correctly-named concepts, matching the
+// corrected Project -> Template -> TemplateVersion -> Import lineage the
+// architecture review asked for.
+model ChartImportTemplate {
+  id        String   @id @default(uuid())
+  projectId String   @unique
+  project   Project  @relation(fields: [projectId], references: [id])
+  createdAt DateTime @default(now())
+
+  versions ChartImportTemplateVersion[]
+}
+
+// A version of its parent Template - a new version is only created when a
+// Project's imported header set differs from its current active version,
+// so historical imports/ChartImportRows keep a stable pointer to exactly
+// the column layout that produced them.
+model ChartImportTemplateVersion {
+  id          String              @id @default(uuid())
+  templateId  String
+  template    ChartImportTemplate @relation(fields: [templateId], references: [id])
+  version     Int
+  headers     String[]
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  createdById String?
+  createdBy   User?    @relation("ChartImportTemplateCreatedBy", fields: [createdById], references: [id])
+
+  imports    ChartImport[]
+  importRows ChartImportRow[]
+
+  @@unique([templateId, version])
+  @@index([templateId, isActive])
+}
+
+// The Import History record required by docs/09-BUSINESS-RULES.md section
+// 11 - one row per import attempt (preview never creates one; only a
+// commit does), always written in the SAME transaction as the
+// Chart/ChartImportRow writes it produces, so status can never be
+// COMPLETED while the writes it describes did not actually happen (see
+// ChartImportsService).
+model ChartImport {
+  id                String              @id @default(uuid())
+  projectId         String
+  project           Project             @relation(fields: [projectId], references: [id])
+  templateVersionId String?
+  templateVersion   ChartImportTemplateVersion? @relation(fields: [templateVersionId], references: [id])
+
+  fileName String
+  fileType ChartImportFileType
+  status   ChartImportStatus @default(PENDING)
+
+  totalRows     Int @default(0)
+  validRows     Int @default(0)
+  invalidRows   Int @default(0)
+  duplicateRows Int @default(0)
+  successRows   Int @default(0)
+  failedRows    Int @default(0)
+
+  // A capped list of row-level validation messages (never the raw file
+  // contents, never full row dumps) - enough for the Manager to see what
+  // went wrong without persisting client PHI/PII-adjacent data twice.
+  errorSummary Json?
+
+  importedById String?
+  importedBy   User?    @relation("ChartImportImportedBy", fields: [importedById], references: [id])
+  importedAt   DateTime @default(now())
+
+  chartsTouched Chart[]
+  rows          ChartImportRow[]
+
+  @@index([projectId, importedAt])
+  @@index([status])
+}
+
+// NEW (architecture-review correction): the actual per-row source-of-truth
+// for a client-imported chart's attribute values - one row per (import,
+// chart) pair, INSERT-only, never updated or overwritten. Re-importing an
+// already-imported ChartID appends a brand-new row here rather than
+// mutating anything on Chart, so:
+//   - every historical set of client-provided values for a ChartID is kept
+//     forever, even across repeated imports with changed values;
+//   - a Chart's ProductionEntry/AuditEntry/Rework history is never at risk
+//     of being touched by a later re-import, because this table has no
+//     relation to any of them;
+//   - "where did ChartID X come from" is answered precisely: this row's
+//     chartImport (project/file/importedBy/importedAt) + templateVersion.
+model ChartImportRow {
+  id String @id @default(uuid())
+
+  chartImportId String
+  chartImport   ChartImport @relation(fields: [chartImportId], references: [id])
+
+  templateVersionId String
+  templateVersion   ChartImportTemplateVersion @relation(fields: [templateVersionId], references: [id])
+
+  // References Chart.chartId (not Chart.id), mirroring the existing
+  // ProductionEntry->Chart relation pattern already used elsewhere in this
+  // schema.
+  chartId String
+  chart   Chart  @relation(fields: [chartId], references: [chartId])
+
+  rowNumber Int
+
+  pageCount       Int
+  pageBucket      String?
+  textbox9        String?
+  eventTypeName2  String?
+  highLevelStatus String?
+
+  createdAt DateTime @default(now())
+
+  @@index([chartImportId])
+  @@index([chartId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 10D — Chart Allocation (Manager Summary export -> Team Lead
+// Login-Name allocation upload -> Coder Production visibility)
+// ─────────────────────────────────────────────────────────────
+// See docs/09-BUSINESS-RULES.md section 12. For a MANUAL-allocation-type
+// Project, Charts exist (via Phase 10A/10B's client Raw import) before any
+// Coder is assigned to them. This phase adds the actual Manager -> Team
+// Lead -> Coder assignment step: the Manager exports a filtered Summary of
+// a Project's charts (client columns + a blank "Assigned to" + a fixed
+// "Shift 1"), the Team Lead fills in each row's "Assigned to" with a
+// Coder's Login Name and re-uploads it, and SmartCode validates + commits
+// one ChartAllocation row per Chart - the actual, queryable, append-only
+// ledger the Chart.assignedCoderId/assignedById/assignedAt scalars above
+// (reserved since Phase 10A-10B) were always meant to summarize. Those
+// three Chart scalars remain the cheap "current assignment" pointer
+// (mirroring Chart.sourceImportId's own role for ChartImportRow) - this
+// table is the source of truth for history; the pointer is refreshed by
+// every allocate/pullback/reassign, never the other way around.
+
+// Import History record for a Team Lead's Summary upload, mirroring
+// ChartImport's shape/lifecycle exactly (same file-type/status enums,
+// reused rather than duplicated - a second all-or-nothing, one-file-one-
+// transaction import workflow, not a conceptually different one; see
+// ChartAllocationsService.commitAllocationUpload).
+model ChartAllocationImport {
+  id        String  @id @default(uuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id])
+
+  fileName String
+  fileType ChartImportFileType
+  status   ChartImportStatus @default(PENDING)
+
+  totalRows     Int @default(0)
+  validRows     Int @default(0)
+  invalidRows   Int @default(0)
+  duplicateRows Int @default(0)
+  successRows   Int @default(0)
+  failedRows    Int @default(0)
+
+  // Same rationale as ChartImport.errorSummary above - a capped list of
+  // row-level validation messages, never raw file contents.
+  errorSummary Json?
+
+  importedById String?
+  importedBy   User?    @relation("ChartAllocationImportedBy", fields: [importedById], references: [id])
+  importedAt   DateTime @default(now())
+
+  allocations ChartAllocation[]
+
+  @@index([projectId, importedAt])
+  @@index([status])
+}
+
+// Reason an allocation row was closed out. Reassignment and pullback are
+// distinct operations with distinct consequences (a reassignment always
+// creates a brand-new active row for a different Coder in the same
+// transaction; a pullback leaves the Chart unassigned until the next
+// Summary upload or an explicit reassignment) - kept as a real enum, not
+// free-text, so the ledger can be queried/reported on precisely.
+enum ChartAllocationEndReason {
+  PULLED_BACK
+  REASSIGNED
+}
+
+// The actual append-only allocation ledger. A partial unique index (raw
+// SQL - see this table's migration; Prisma's schema DSL cannot express a
+// partial index) enforces "at most one ACTIVE allocation per chartId",
+// mirroring the exact same pattern already used for ProjectTeamAssignment/
+// VendorAssignment/LoginNameAllocation above.
+model ChartAllocation {
+  id String @id @default(uuid())
+
+  // References Chart.chartId (business key), matching the established
+  // pattern already used by ProductionEntry/Rework/ChartImportRow above.
+  chartId String
+  chart   Chart  @relation(fields: [chartId], references: [chartId])
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id])
+
+  coderId String
+  coder   User   @relation("ChartAllocationCoder", fields: [coderId], references: [id])
+
+  // Snapshot of the Coder's Login Name at allocation time - the Team
+  // Lead's Summary upload is keyed by Login Name (an auditable allocation
+  // identity per docs/09-BUSINESS-RULES.md section 10 / Phase 9), and a
+  // later Login Name change must never rewrite what this historical row
+  // says was actually typed into the upload - mirrors
+  // LoginNameAllocation.employeeId's own "snapshot, not a live join"
+  // rationale above.
+  loginNameSnapshot String
+
+  // The Coder's Vendor/Team at allocation time, snapshotted for the same
+  // reason as loginNameSnapshot - a later team/vendor change must not
+  // rewrite what this row says was actually validated and allocated.
+  vendorId String?
+  vendor   Vendor? @relation(fields: [vendorId], references: [id])
+  teamId   String?
+  team     Team?   @relation(fields: [teamId], references: [id])
+
+  teamLeadId String?
+  teamLead   User?  @relation("ChartAllocationTeamLead", fields: [teamLeadId], references: [id])
+
+  assignedById String
+  assignedBy   User     @relation("ChartAllocationAssignedBy", fields: [assignedById], references: [id])
+  assignedAt   DateTime @default(now())
+
+  sourceImportId String?
+  sourceImport   ChartAllocationImport? @relation(fields: [sourceImportId], references: [id])
+
+  isActive Boolean @default(true)
+
+  endedAt   DateTime?
+  endedById String?
+  endedBy   User?                     @relation("ChartAllocationEndedBy", fields: [endedById], references: [id])
+  endReason ChartAllocationEndReason?
+  // Optional free-text context for a pullback (e.g. "wrong coder", "coder
+  // on leave") - docs/09-BUSINESS-RULES.md section 12 item "reason where
+  // applicable". Reassignment's "reason" is implicit in endReason plus the
+  // nextAllocation it links to, so this is populated only for PULLED_BACK.
+  endNote   String?
+
+  // Reassignment chain - the row this one replaced (null for a chart's
+  // very first allocation). Lets the ledger answer "what was this chart
+  // reassigned FROM" without scanning by chartId+assignedAt ordering.
+  previousAllocationId String?          @unique
+  previousAllocation   ChartAllocation? @relation("ChartAllocationChain", fields: [previousAllocationId], references: [id])
+  nextAllocation       ChartAllocation? @relation("ChartAllocationChain")
+
+  @@index([chartId, isActive])
+  @@index([coderId, isActive])
+  @@index([projectId, isActive])
+  @@index([teamId, isActive])
 }
 
 // Versioned per docs/11-SCHEMA-DECISIONS.md Question 1 (approved):

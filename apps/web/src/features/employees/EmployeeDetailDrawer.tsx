@@ -66,6 +66,10 @@ export function EmployeeDetailDrawer({ employeeRowId, onClose }: { employeeRowId
             <Field label="Vendor" value={data.vendor?.name ?? '—'} />
             <Field label="Team" value={data.team?.name ?? '—'} />
             <Field label="Team Lead" value={data.teamLead?.fullName ?? data.teamLead?.loginName ?? '—'} />
+            <Field
+              label="Assigned Project(s)"
+              value={data.assignedProjects === null || data.assignedProjects === undefined ? 'Enterprise' : data.assignedProjects.length ? data.assignedProjects.map((p) => p.name).join(', ') : '—'}
+            />
           </div>
 
           <Divider />

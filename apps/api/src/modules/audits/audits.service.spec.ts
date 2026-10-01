@@ -61,7 +61,12 @@ describe('AuditsService', () => {
     };
     prisma = {
       chart: { findUnique: jest.fn().mockResolvedValue(chart) },
-      auditorProjectAssignment: { findUnique: jest.fn(async ({ where }) => (where.auditorId_projectId.auditorId === auditor.id ? { id: 'asg' } : null)) },
+      // Organization Assignment requirement section 13 - unassigning an
+      // Auditor is now a soft-delete (isActive: false) rather than a hard
+      // DELETE, so the old `auditorId_projectId` compound-unique lookup no
+      // longer exists; AuditsService now calls findFirst scoped to
+      // isActive: true (see audits.service.ts#chartForCaller).
+      auditorProjectAssignment: { findFirst: jest.fn(async ({ where }) => (where.auditorId === auditor.id && where.isActive === true ? { id: 'asg' } : null)) },
       productionEntry: {
         findFirst: jest.fn().mockResolvedValue({ id: 'p-1', version: 1, status: 'COMPLETED', auditEntries: [], coder: person('coder-1'), pageCount: 10, totalDOS: 2, totalICDs: 4, codedDate: new Date('2026-01-10') }),
         findMany: jest.fn().mockResolvedValue([]),
@@ -264,7 +269,7 @@ describe('AuditsService', () => {
       expect(where).toMatchObject({
         isCurrent: true,
         status: 'COMPLETED',
-        chart: { project: { auditorAssignments: { some: { auditorId: auditor.id } } } },
+        chart: { project: { auditorAssignments: { some: { auditorId: auditor.id, isActive: true } } } },
         auditEntries: { none: {} },
       });
     });

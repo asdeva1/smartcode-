@@ -15,6 +15,7 @@ export default function Page() {
       basePath="/vendor/coders"
       showImportExport={false}
       allowLoginNameRequest={false}
+      allowRelieveFromTeam={false}
       headerActions={(actions) => (
         <PageHeader
           title="Coders"

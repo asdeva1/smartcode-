@@ -18,6 +18,10 @@ export interface EmployeeRow {
   vendor: { id: string; name: string } | null;
   team: { id: string; name: string } | null;
   teamLead: { id: string; fullName: string | null; loginName: string } | null;
+  // Organization Assignment + Auto-Visibility requirement section 8 -
+  // null for MANAGER (enterprise-wide scope, not a per-project
+  // assignment); an array (possibly empty) for every other role.
+  assignedProjects: { id: string; name: string }[] | null;
   createdAt: string;
 }
 

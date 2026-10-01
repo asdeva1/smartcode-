@@ -30,7 +30,11 @@ describe('CodersService (Team Lead coder management)', () => {
 
   beforeEach(async () => {
     tx = {
-      user: { create: jest.fn(async ({ data }) => ({ id: `new-${data.loginName}`, ...data })) },
+      user: {
+        create: jest.fn(async ({ data }) => ({ id: `new-${data.loginName}`, ...data })),
+        update: jest.fn(async ({ data }) => ({ ...coderRow, ...data })),
+      },
+      teamMembership: { updateMany: jest.fn().mockResolvedValue({ count: 1 }), create: jest.fn().mockResolvedValue({}), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
     prisma = {
@@ -42,6 +46,7 @@ describe('CodersService (Team Lead coder management)', () => {
         update: jest.fn(async ({ data }) => ({ ...coderRow, ...data })),
         create: jest.fn(async ({ data }) => ({ id: 'c-new', createdAt: new Date(), isActive: true, lastLoginAt: null, ...data })),
       },
+      teamMembership: { updateMany: jest.fn().mockResolvedValue({ count: 1 }), create: jest.fn().mockResolvedValue({}), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
       productionEntry: { findMany: jest.fn().mockResolvedValue([]) },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
       vendorAssignment: { findFirst: jest.fn().mockResolvedValue(null) },
@@ -241,6 +246,35 @@ describe('CodersService (Team Lead coder management)', () => {
     it('rejects imports from anyone but a Team Lead with a team', async () => {
       await expect(service.importPreview(manager, csv(HEADER))).rejects.toThrow(ForbiddenException);
       await expect(service.importPreview(teamLeadNoTeam, csv(HEADER))).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('relieveFromTeam (Organization Assignment + Auto-Visibility requirement)', () => {
+    it('ends the active TeamMembership, clears User.teamId, and logs it - Coder account and history are untouched', async () => {
+      await service.relieveFromTeam(teamLead, 'c-1');
+      expect(tx.teamMembership.updateMany).toHaveBeenCalledWith({
+        where: { coderId: 'c-1', isActive: true },
+        data: expect.objectContaining({ isActive: false, endedById: teamLead.id, endReason: 'RELIEVED' }),
+      });
+      expect(tx.user.update).toHaveBeenCalledWith({ where: { id: 'c-1' }, data: { teamId: null } });
+      expect(tx.teamMembership.create).not.toHaveBeenCalled(); // no replacement membership opened
+      expect(prisma.auditLog.create.mock.calls.map((c: any) => c[0].data.action)).toContain('CODER_RELIEVED_FROM_TEAM');
+    });
+
+    it('rejects a Vendor or Manager caller (backend-enforced, not frontend-only)', async () => {
+      await expect(service.relieveFromTeam(manager, 'c-1')).rejects.toThrow(ForbiddenException);
+      expect(tx.user.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects relieving a Coder outside the caller\'s own team (same 404 as any other cross-team lookup)', async () => {
+      prisma.user.findFirst.mockResolvedValueOnce(null);
+      await expect(service.relieveFromTeam(teamLead, 'other')).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects a Coder who is not currently on a team', async () => {
+      prisma.user.findFirst.mockResolvedValueOnce({ ...coderRow, teamId: null });
+      await expect(service.relieveFromTeam(teamLead, 'c-1')).rejects.toThrow(ConflictException);
+      expect(tx.user.update).not.toHaveBeenCalled();
     });
   });
 

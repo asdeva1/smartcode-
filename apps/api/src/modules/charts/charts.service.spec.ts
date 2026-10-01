@@ -51,8 +51,8 @@ describe('ChartsService (Chart Repository)', () => {
   it.each([
     ['Manager', manager, {}],
     ['Team Lead', teamLead, { project: { teamId: 'team-1' } }],
-    ['Coder', coder, { productionEntries: { some: { coderId: 'c' } } }],
-    ['Auditor', auditor, { project: { auditorAssignments: { some: { auditorId: 'a' } } } }],
+    ['Coder', coder, { OR: [{ productionEntries: { some: { coderId: 'c' } } }, { allocations: { some: { coderId: 'c', isActive: true } } }] }],
+    ['Auditor', auditor, { project: { auditorAssignments: { some: { auditorId: 'a', isActive: true } } } }],
   ])('scopes the %s view', async (_l, who, scope) => {
     await service.list(who, { page: 1, pageSize: 25, search: 'CH', auditState: 'NOT_AUDITED' });
     const and = prisma.chart.findMany.mock.calls[0][0].where.AND;

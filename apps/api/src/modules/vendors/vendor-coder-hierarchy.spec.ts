@@ -30,6 +30,11 @@ describe('UsersService.createCoder - Vendor Portal + Team Lead creation, hierarc
       },
       vendorAssignment: { findFirst: jest.fn().mockResolvedValue(null) },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
+      // createWithRole() opens a TeamMembership history row (Organization
+      // Assignment requirement) for any CODER created directly onto a Team -
+      // true for every test below that gives the new Coder a teamId
+      // (items 3, 6, and the "Team Lead with no vendor" case).
+      teamMembership: { create: jest.fn().mockResolvedValue({}) },
     };
     // This hierarchy test never exercises changeLoginName, so a plain
     // never-called stub is enough - the constructor now requires this
@@ -98,10 +103,21 @@ describe('VendorsService.assignTeamLead - hierarchy items 4, 5', () => {
       },
       user: {
         findUnique: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       team: { create: jest.fn(async ({ data }) => ({ id: 'team-new', ...data })) },
       auditorProjectAssignment: { findMany: jest.fn().mockResolvedValue([]) },
+      // assignTeamLead() now wraps the Coder cascade in a transaction
+      // (TeamMembership ledger - Organization Assignment requirement) via
+      // common/team-membership.ts#cascadeCodersToTeam. $transaction here
+      // runs the callback against this same `prisma` object (tx === prisma),
+      // matching the pattern already used elsewhere in this codebase.
+      $transaction: jest.fn((cb: (tx: unknown) => unknown) => cb(prisma)),
+      teamMembership: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
     users = {};
@@ -112,13 +128,19 @@ describe('VendorsService.assignTeamLead - hierarchy items 4, 5', () => {
     prisma.user.findUnique
       .mockResolvedValueOnce(teamLeadRow('tl-1', { leadsTeam: { id: 'team-1', projects: [] } })) // assign()'s own lookup
       .mockResolvedValueOnce({ id: 'tl-1', fullName: 'TL tl-1', loginName: 'tl-1.login', leadsTeam: { id: 'team-1' } }); // assignTeamLead()'s team lookup
+    // The three active Coders under this vendor, none currently on team-1.
+    prisma.user.findMany.mockResolvedValueOnce([{ id: 'c-1', teamId: null }, { id: 'c-2', teamId: null }, { id: 'c-3', teamId: null }]);
     prisma.user.updateMany.mockResolvedValueOnce({ count: 3 });
 
     const result = await service.assignTeamLead(manager, V, 'tl-1');
 
     expect(prisma.vendorAssignment.create.mock.calls[0][0].data).toMatchObject({ vendorId: V, userId: 'tl-1', role: 'TEAM_LEAD' });
     expect(prisma.team.create).not.toHaveBeenCalled(); // already has a team - not recreated
-    expect(prisma.user.updateMany.mock.calls[0][0]).toEqual({ where: { role: 'CODER', vendorId: V, isActive: true }, data: { teamId: 'team-1' } });
+    // The vendor's active Coders are looked up first (this is the query the
+    // old, pre-cascade implementation ran directly against updateMany).
+    expect(prisma.user.findMany.mock.calls[0][0].where).toEqual({ role: 'CODER', vendorId: V, isActive: true });
+    // Then moved by id, inside the same transaction as the TeamMembership ledger update.
+    expect(prisma.user.updateMany.mock.calls[0][0]).toEqual({ where: { id: { in: ['c-1', 'c-2', 'c-3'] } }, data: { teamId: 'team-1' } });
     expect(result).toMatchObject({ teamId: 'team-1', codersMoved: 3 });
     expect(prisma.auditLog.create.mock.calls.map((c: any) => c[0].data.action)).toContain('VENDOR_TEAM_LEAD_CODERS_CASCADED');
   });
@@ -143,6 +165,8 @@ describe('VendorsService.assignTeamLead - hierarchy items 4, 5', () => {
     prisma.user.findUnique
       .mockResolvedValueOnce(teamLeadRow('tl-02', { leadsTeam: { id: 'team-02', projects: [] } }))
       .mockResolvedValueOnce({ id: 'tl-02', fullName: 'TL tl-02', loginName: 'tl-02.login', leadsTeam: { id: 'team-02' } });
+    const movingCoderIds = ['c-1', 'c-2', 'c-3', 'c-4', 'c-5'];
+    prisma.user.findMany.mockResolvedValueOnce(movingCoderIds.map((id) => ({ id, teamId: 'team-01' })));
     prisma.user.updateMany.mockResolvedValueOnce({ count: 5 });
 
     const result = await service.assignTeamLead(manager, V, 'tl-02');
@@ -152,7 +176,8 @@ describe('VendorsService.assignTeamLead - hierarchy items 4, 5', () => {
     // The new Team Lead was assigned.
     expect(prisma.vendorAssignment.create.mock.calls[0][0].data).toMatchObject({ userId: 'tl-02' });
     // Every active Coder under the vendor - tracked by vendorId, not by the old team - moved directly onto TL-02's team.
-    expect(prisma.user.updateMany.mock.calls[0][0]).toEqual({ where: { role: 'CODER', vendorId: V, isActive: true }, data: { teamId: 'team-02' } });
+    expect(prisma.user.findMany.mock.calls[0][0].where).toEqual({ role: 'CODER', vendorId: V, isActive: true });
+    expect(prisma.user.updateMany.mock.calls[0][0]).toEqual({ where: { id: { in: movingCoderIds } }, data: { teamId: 'team-02' } });
     expect(result.codersMoved).toBe(5);
   });
 });
@@ -162,12 +187,18 @@ describe('VendorsService.removeTeamLead - no stale Team Lead relationships left 
     const prisma: any = {
       vendor: { findUnique: jest.fn().mockResolvedValue({ id: V, name: 'Alpha', isActive: true }) },
       vendorAssignment: { findFirst: jest.fn().mockResolvedValue({ id: 'asg-1', vendorId: V, userId: 'tl-1', role: 'TEAM_LEAD', isActive: true, assignedAt: new Date() }), update: jest.fn().mockResolvedValue({}) },
-      user: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
+      user: {
+        findMany: jest.fn().mockResolvedValue([{ id: 'c-1' }, { id: 'c-2' }]),
+        updateMany: jest.fn().mockResolvedValue({ count: 2 }),
+      },
+      $transaction: jest.fn((cb: (tx: unknown) => unknown) => cb(prisma)),
+      teamMembership: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
     const service = new VendorsService(prisma, {} as any);
     const result = await service.removeTeamLead(manager, V, 'tl-1');
-    expect(prisma.user.updateMany.mock.calls[0][0]).toEqual({ where: { role: 'CODER', vendorId: V, isActive: true }, data: { teamId: null } });
+    expect(prisma.user.findMany.mock.calls[0][0].where).toEqual({ role: 'CODER', vendorId: V, isActive: true, teamId: { not: null } });
+    expect(prisma.user.updateMany.mock.calls[0][0]).toEqual({ where: { id: { in: ['c-1', 'c-2'] } }, data: { teamId: null } });
     expect(result.codersDetached).toBe(2);
   });
 });

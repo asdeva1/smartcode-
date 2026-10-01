@@ -20,6 +20,9 @@ import { ApprovalsModule } from './modules/approvals/approvals.module';
 import { PasswordResetModule } from './modules/password-reset/password-reset.module';
 import { LoginNameAllocationModule } from './modules/login-name-allocations/login-name-allocation.module';
 import { EmployeesModule } from './modules/employees/employees.module';
+import { ChartImportsModule } from './modules/chart-imports/chart-imports.module';
+import { ChartAllocationsModule } from './modules/chart-allocations/chart-allocations.module';
+import { OrgContextModule } from './modules/org-context/org-context.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { envValidationSchema } from './config/env.validation';
 
@@ -52,6 +55,9 @@ import { envValidationSchema } from './config/env.validation';
     PasswordResetModule,
     LoginNameAllocationModule,
     EmployeesModule,
+    ChartImportsModule,
+    ChartAllocationsModule,
+    OrgContextModule,
     HealthModule,
   ],
   providers: [

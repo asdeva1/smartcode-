@@ -14,6 +14,14 @@
  *   carry). Every other role has no team.
  * - Team Lead: whoever leads the resolved team, if any.
  */
+// PROJECT_REF_SELECT is added for the Organization Assignment +
+// Auto-Visibility requirement (section 8 - Manager Employee Directory
+// "Assigned Project(s)" column). Only ACTIVE assignments/projects are
+// selected - a Coder/Auditor's ended project involvement is history, not
+// a current assignment, and the Directory must show current context (see
+// orgProjectsRef below).
+const PROJECT_REF_SELECT = { id: true, name: true } as const;
+
 export const ORG_USER_SELECT = {
   id: true,
   fullName: true,
@@ -24,17 +32,37 @@ export const ORG_USER_SELECT = {
   isActive: true,
   createdAt: true,
   vendor: { select: { id: true, name: true } },
-  team: { select: { id: true, name: true, teamLead: { select: { id: true, fullName: true, loginName: true } } } },
-  leadsTeam: { select: { id: true, name: true, teamLead: { select: { id: true, fullName: true, loginName: true } } } },
+  team: {
+    select: {
+      id: true,
+      name: true,
+      teamLead: { select: { id: true, fullName: true, loginName: true } },
+      projects: { where: { isActive: true }, select: PROJECT_REF_SELECT, orderBy: { name: 'asc' } },
+    },
+  },
+  leadsTeam: {
+    select: {
+      id: true,
+      name: true,
+      teamLead: { select: { id: true, fullName: true, loginName: true } },
+      projects: { where: { isActive: true }, select: PROJECT_REF_SELECT, orderBy: { name: 'asc' } },
+    },
+  },
   vendorAssignments: { where: { isActive: true }, select: { vendor: { select: { id: true, name: true } } }, take: 1 },
+  // AUDITOR-only in practice (a non-Auditor has none), but selected
+  // unconditionally - Prisma requires a static select shape and every
+  // other relation here follows the same "select for every role, only
+  // some roles' rows populate it" pattern (e.g. leadsTeam).
+  auditorAssignments: { where: { isActive: true }, select: { project: { select: PROJECT_REF_SELECT } }, orderBy: { assignedAt: 'desc' } },
 } as const;
 
 type OrgUser = {
   role: string;
   vendor?: { id: string; name: string } | null;
   vendorAssignments?: { vendor: { id: string; name: string } }[];
-  team?: { id: string; name: string; teamLead: { id: string; fullName: string | null; loginName: string } | null } | null;
-  leadsTeam?: { id: string; name: string; teamLead: { id: string; fullName: string | null; loginName: string } | null } | null;
+  team?: { id: string; name: string; teamLead: { id: string; fullName: string | null; loginName: string } | null; projects?: { id: string; name: string }[] } | null;
+  leadsTeam?: { id: string; name: string; teamLead: { id: string; fullName: string | null; loginName: string } | null; projects?: { id: string; name: string }[] } | null;
+  auditorAssignments?: { project: { id: string; name: string } }[];
 };
 
 export function orgVendorRef(u: OrgUser) {
@@ -47,4 +75,16 @@ export function orgTeamRef(u: OrgUser) {
 
 export function orgTeamLeadRef(u: OrgUser) {
   return orgTeamRef(u)?.teamLead ?? null;
+}
+
+/**
+ * Currently-assigned Project(s) - Coder/Team Lead: their Team's active
+ * Projects; Auditor: their active AuditorProjectAssignment rows; Manager/
+ * Vendor: not resolvable from a single User row (a Manager has enterprise
+ * scope; a Vendor's projects span every Team under it) - callers resolve
+ * those two roles separately (see EmployeesService/OrgContextService).
+ */
+export function orgProjectsRef(u: OrgUser): { id: string; name: string }[] {
+  if (u.role === 'AUDITOR') return u.auditorAssignments?.map((a) => a.project) ?? [];
+  return orgTeamRef(u)?.projects ?? [];
 }

@@ -47,6 +47,10 @@ describe('ProductionService', () => {
     prisma = {
       chart: { findUnique: jest.fn().mockResolvedValue(null) },
       project: { findUnique: jest.fn().mockResolvedValue({ id: PROJECT, teamId: TEAM, isActive: true }) },
+      // Phase 10D: only consulted when chart.project.allocationType === 'MANUAL' -
+      // every pre-existing (AUTOMATIC, allocationType undefined) test above never
+      // touches this, so it is a safe, additive default.
+      chartAllocation: { findFirst: jest.fn().mockResolvedValue(null) },
       productionEntry: {
         findFirst: jest.fn().mockResolvedValue(null),
         findUnique: jest.fn().mockResolvedValue(row()),
@@ -122,6 +126,42 @@ describe('ProductionService', () => {
     it('turns a unique-index race into a 409', async () => {
       prisma.$transaction.mockRejectedValueOnce(Object.assign(new Error('dup'), { code: 'P2002' }));
       await expect(service.create(coder, dto)).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('Phase 10D - MANUAL project allocation enforcement (additive; AUTOMATIC-project tests above are all unaffected since their fixtures never set allocationType: \'MANUAL\')', () => {
+    it('allows a Coder to submit production for an existing MANUAL-project chart that is actively allocated to them', async () => {
+      prisma.chart.findUnique.mockResolvedValueOnce({ chartId: 'CH-100', projectId: PROJECT, project: { teamId: TEAM, name: 'Proj', allocationType: 'MANUAL' } });
+      prisma.chartAllocation.findFirst.mockResolvedValueOnce({ id: 'ca-1', chartId: 'CH-100', coderId: coder.id, isActive: true });
+      await expect(service.create(coder, dto)).resolves.toBeDefined();
+      expect(prisma.chartAllocation.findFirst.mock.calls[0][0]).toEqual({ where: { chartId: 'CH-100', isActive: true, coderId: coder.id } });
+    });
+
+    it('rejects a Coder submitting production for an existing MANUAL-project chart with no active allocation to them', async () => {
+      prisma.chart.findUnique.mockResolvedValueOnce({ chartId: 'CH-100', projectId: PROJECT, project: { teamId: TEAM, name: 'Proj', allocationType: 'MANUAL' } });
+      prisma.chartAllocation.findFirst.mockResolvedValueOnce(null);
+      await expect(service.create(coder, dto)).rejects.toThrow(ForbiddenException);
+      expect(tx.productionEntry.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a Coder submitting production for a chart actively allocated to a DIFFERENT coder in a MANUAL project', async () => {
+      prisma.chart.findUnique.mockResolvedValueOnce({ chartId: 'CH-100', projectId: PROJECT, project: { teamId: TEAM, name: 'Proj', allocationType: 'MANUAL' } });
+      // findFirst is called scoped to THIS caller's coderId, so a chart allocated to someone else resolves null for this caller.
+      prisma.chartAllocation.findFirst.mockResolvedValueOnce(null);
+      await expect(service.create(coder, dto)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects a Coder self-creating a brand-new chart in a MANUAL project - only the Raw import + Team Lead allocation workflow creates MANUAL-project charts', async () => {
+      prisma.project.findUnique.mockResolvedValueOnce({ id: PROJECT, teamId: TEAM, isActive: true, allocationType: 'MANUAL' });
+      await expect(service.create(coder, { ...dto, chartId: 'CH-BRAND-NEW' })).rejects.toThrow(ForbiddenException);
+      expect(tx.chart.create).not.toHaveBeenCalled();
+      expect(tx.productionEntry.create).not.toHaveBeenCalled();
+    });
+
+    it('still allows a Coder to self-create a brand-new chart in an AUTOMATIC project (existing behavior, unchanged)', async () => {
+      prisma.project.findUnique.mockResolvedValueOnce({ id: PROJECT, teamId: TEAM, isActive: true, allocationType: 'AUTOMATIC' });
+      await expect(service.create(coder, { ...dto, chartId: 'CH-BRAND-NEW' })).resolves.toBeDefined();
+      expect(tx.chart.create).toHaveBeenCalledWith({ data: { chartId: 'CH-BRAND-NEW', projectId: PROJECT } });
     });
   });
 

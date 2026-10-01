@@ -83,6 +83,22 @@ export class ProductionService {
       if (dto.projectId && dto.projectId !== chart.projectId) {
         throw new BadRequestException(`Chart ${chartId} already belongs to project "${chart.project.name}"`);
       }
+      // Phase 10D (docs/09-BUSINESS-RULES.md section 12): for a MANUAL
+      // project, a Coder may only submit production against a chart that is
+      // actively allocated to them - allocation (via the Manager Summary /
+      // Team Lead upload workflow), not the Coder's own chart-ID entry, is
+      // the sole gate for who may code a MANUAL chart. AUTOMATIC-project
+      // charts are entirely unaffected by this check.
+      if (chart.project.allocationType === 'MANUAL') {
+        const activeAllocation = await this.prisma.chartAllocation.findFirst({
+          where: { chartId, isActive: true, coderId: caller.id },
+        });
+        if (!activeAllocation) {
+          throw new ForbiddenException(
+            `Chart ${chartId} is not allocated to you. Ask your Team Lead to allocate this chart before entering production.`,
+          );
+        }
+      }
       const current = await this.prisma.productionEntry.findFirst({ where: { chartId, isCurrent: true } });
       if (current && current.status !== 'CANCELLED') {
         throw new ConflictException(
@@ -97,6 +113,15 @@ export class ProductionService {
       const project = await this.prisma.project.findUnique({ where: { id: dto.projectId } });
       if (!project || !project.isActive) throw new NotFoundException('Project not found or inactive');
       if (project.teamId !== teamId) throw new ForbiddenException('This project is not assigned to your team');
+      // Phase 10D: MANUAL-project charts are created only by the client Raw
+      // import + Team Lead allocation workflow - a Coder cannot self-create
+      // a brand-new chart in a MANUAL project. AUTOMATIC projects keep their
+      // existing Coder-initiated chart-creation behavior unchanged.
+      if (project.allocationType === 'MANUAL') {
+        throw new ForbiddenException(
+          `Chart ${chartId} does not exist in this MANUAL project. Charts are created by import and allocated by your Team Lead - you cannot create a new chart here.`,
+        );
+      }
     }
 
     try {

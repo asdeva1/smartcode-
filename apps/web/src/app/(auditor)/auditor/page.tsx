@@ -7,6 +7,7 @@ import { Search } from 'lucide-react';
 import { ChartIdSchema } from '@smartcode/types';
 import { Button, Input, PageHeader } from '@smartcode/ui';
 import { DashboardMetrics } from '@/components/data/DashboardMetrics';
+import { OrgContextBanner } from '@/components/data/OrgContextBanner';
 import { WelcomeAndQuickActions } from '@/components/data/QuickActions';
 import { ReworkPanel } from '@/features/rework/ReworkPanel';
 
@@ -25,6 +26,7 @@ export default function AuditorDashboardPage() {
   return (
     <>
       <PageHeader title="My Dashboard" description="Your audit overview" />
+      <OrgContextBanner />
       <WelcomeAndQuickActions
         actions={[
           { label: 'Audit Queue', href: '/auditor/queue' },

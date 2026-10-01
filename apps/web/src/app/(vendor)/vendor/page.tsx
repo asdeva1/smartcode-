@@ -1,6 +1,7 @@
 'use client';
 import * as React from 'react';
 import { PageHeader } from '@smartcode/ui';
+import { OrgContextBanner } from '@/components/data/OrgContextBanner';
 import { WelcomeAndQuickActions } from '@/components/data/QuickActions';
 import { ReworkPanel } from '@/features/rework/ReworkPanel';
 import { VendorMetrics } from '@/features/vendors/VendorMetrics';
@@ -12,6 +13,7 @@ export default function VendorDashboardPage() {
   return (
     <>
       <PageHeader title="Vendor Dashboard" description={data ? `${data.name} (${data.code})` : 'Your vendor overview'} />
+      <OrgContextBanner />
       <WelcomeAndQuickActions
         actions={[
           { label: 'Team Leads', href: '/vendor/team-leads' },

@@ -1,7 +1,8 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { AuthUser } from '@smartcode/types';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ORG_USER_SELECT, orgTeamLeadRef, orgTeamRef, orgVendorRef } from '../../common/org-ref';
+import { ORG_USER_SELECT, orgProjectsRef, orgTeamLeadRef, orgTeamRef, orgVendorRef } from '../../common/org-ref';
+import { vendorProjectWhere } from '../../common/vendor-scope';
 import { LoginNameAllocationService } from '../login-name-allocations/login-name-allocation.service';
 import type { ListEmployeesDto } from './dto/list-employees.dto';
 
@@ -16,11 +17,24 @@ type OrgUserRow = {
   createdAt: Date;
   vendor?: { id: string; name: string } | null;
   vendorAssignments?: { vendor: { id: string; name: string } }[];
-  team?: { id: string; name: string; teamLead: { id: string; fullName: string | null; loginName: string } | null } | null;
-  leadsTeam?: { id: string; name: string; teamLead: { id: string; fullName: string | null; loginName: string } | null } | null;
+  team?: { id: string; name: string; teamLead: { id: string; fullName: string | null; loginName: string } | null; projects?: { id: string; name: string }[] } | null;
+  leadsTeam?: { id: string; name: string; teamLead: { id: string; fullName: string | null; loginName: string } | null; projects?: { id: string; name: string }[] } | null;
+  auditorAssignments?: { project: { id: string; name: string } }[];
 };
 
-function toRow(u: OrgUserRow) {
+/**
+ * Organization Assignment + Auto-Visibility requirement section 8 - the
+ * Manager Employee Directory shows "Assigned Project(s)" per employee.
+ * For CODER/TEAM_LEAD/AUDITOR this is `orgProjectsRef` (derived from the
+ * same Team/AuditorProjectAssignment relations org-ref.ts already
+ * resolves - no new table, no duplicated data). A Vendor account's
+ * projects span every Team under that vendor and are not reachable from
+ * a single User row, so those are resolved by the caller
+ * (`vendorProjectsById`) and passed in; a Manager has enterprise-wide
+ * scope, so `null` ("not a per-project assignment") is correct for it,
+ * not an empty list.
+ */
+function toRow(u: OrgUserRow, vendorProjects?: { id: string; name: string }[]) {
   const team = orgTeamRef(u);
   return {
     id: u.id,
@@ -33,6 +47,7 @@ function toRow(u: OrgUserRow) {
     vendor: orgVendorRef(u),
     team: team ? { id: team.id, name: team.name } : null,
     teamLead: orgTeamLeadRef(u),
+    assignedProjects: u.role === 'VENDOR' ? (vendorProjects ?? null) : u.role === 'MANAGER' ? null : orgProjectsRef(u),
     createdAt: u.createdAt,
   };
 }
@@ -100,7 +115,14 @@ export class EmployeesService {
       this.prisma.user.count({ where }),
     ]);
 
-    return { data: (rows as OrgUserRow[]).map((r: OrgUserRow) => toRow(r)), total, page: query.page, pageSize: query.pageSize };
+    const vendorProjectsByVendorId = await this.vendorProjectsFor((rows as OrgUserRow[]).filter((r) => r.role === 'VENDOR').map((r) => r.vendor?.id).filter((id): id is string => !!id));
+
+    return {
+      data: (rows as OrgUserRow[]).map((r: OrgUserRow) => toRow(r, r.vendor ? vendorProjectsByVendorId.get(r.vendor.id) : undefined)),
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+    };
   }
 
   /** Manager-only detail view - identity/account/org fields plus this user's complete Login Name history. Never passwordHash/tokens/secrets. */
@@ -111,7 +133,27 @@ export class EmployeesService {
     const user = await this.prisma.user.findUnique({ where: { id }, select: ORG_USER_SELECT });
     if (!user) throw new NotFoundException('Employee not found');
 
+    const row = user as OrgUserRow;
+    const vendorProjects = row.role === 'VENDOR' && row.vendor ? (await this.vendorProjectsFor([row.vendor.id])).get(row.vendor.id) : undefined;
     const loginNameHistory = await this.loginNameAllocations.historyForUser(caller, id);
-    return { ...toRow(user as OrgUserRow), loginNameHistory };
+    return { ...toRow(row, vendorProjects), loginNameHistory };
+  }
+
+  /** Batch-resolves each vendorId's active Projects (across every Team under it) in one query per call - a Vendor account's projects are not reachable from its own User row. */
+  private async vendorProjectsFor(vendorIds: string[]): Promise<Map<string, { id: string; name: string }[]>> {
+    const result = new Map<string, { id: string; name: string }[]>();
+    const uniqueIds = [...new Set(vendorIds)];
+    if (uniqueIds.length === 0) return result;
+    await Promise.all(
+      uniqueIds.map(async (vendorId) => {
+        const projects = await this.prisma.project.findMany({
+          where: { ...vendorProjectWhere(vendorId), isActive: true },
+          select: { id: true, name: true },
+          orderBy: { name: 'asc' },
+        });
+        result.set(vendorId, projects);
+      }),
+    );
+    return result;
   }
 }

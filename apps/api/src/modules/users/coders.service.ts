@@ -24,6 +24,7 @@ import { readCsvUpload, toRecords, type UploadedCsvFile } from '../../common/csv
 import { isUniqueViolation, requireTeam } from '../../common/scope';
 import { requireVendor } from '../../common/vendor-scope';
 import { writeAuditLog } from '../../common/audit-log';
+import { openMembership, setCoderTeam } from '../../common/team-membership';
 import { CreateCoderDto } from './dto/create-coder.dto';
 import { UpdateCoderDto } from './dto/update-coder.dto';
 import { ListCodersDto } from './dto/list-coders.dto';
@@ -164,6 +165,56 @@ export class CodersService {
       after: { fullName: updated.fullName, email: updated.email, employeeId: updated.employeeId },
     });
     return toCoderDto(updated);
+  }
+
+  /**
+   * "Relieve from Team" / "Release from Team" - Organization Assignment +
+   * Auto-Visibility requirement section 1. Team-Lead-only, restricted to
+   * their own team's Coders (findOwn/this.scope already enforce that - a
+   * Team Lead can never relieve another team's Coder). Ends the active
+   * TeamMembership row and clears User.teamId in one transaction (via
+   * setCoderTeam), so the Coder immediately stops appearing as an active
+   * Team member and stops receiving new Team-scoped work - but:
+   *
+   *   - the Coder account itself is never touched (isActive is untouched -
+   *     this is not a deactivation, see UsersService#setActive for that),
+   *   - vendorId is never touched (Vendor -> Team Lead -> Coder Hierarchy
+   *     is unaffected - a relieved Coder is still this vendor's Coder,
+   *     just currently on no team),
+   *   - every ProductionEntry/AuditEntry/Rework/ChartAllocation row the
+   *     Coder ever created is untouched (they are keyed by coderId, not
+   *     teamId, and are never cascaded or rewritten by a team change),
+   *   - the TeamMembership row is ended, never deleted, so "Historical
+   *     team membership remains" (requirement item 3) holds by
+   *     construction.
+   *
+   * Backend-enforced (not a frontend-only removal, per the requirement's
+   * explicit instruction) - the frontend confirmation dialog is purely a
+   * UX courtesy; this method is the actual authority.
+   */
+  async relieveFromTeam(caller: AuthUser, id: string) {
+    if (caller.role !== 'TEAM_LEAD') {
+      throw new ForbiddenException('Only a Team Lead can relieve a Coder from a Team');
+    }
+    const target = await this.findOwn(caller, id);
+    if (!target.teamId) {
+      throw new ConflictException('This Coder is not currently assigned to a Team');
+    }
+    const teamId = target.teamId;
+    await this.prisma.$transaction((tx) => setCoderTeam(tx, caller, id, null, 'RELIEVED'));
+    await writeAuditLog(this.prisma, caller, 'CODER_RELIEVED_FROM_TEAM', 'User', id, {
+      before: { teamId },
+      after: { teamId: null, reason: 'RELIEVED' },
+    });
+    const updated = await this.findOwnAnyTeam(id);
+    return toCoderDto(updated);
+  }
+
+  /** Same lookup as findOwn, but by id only - used right after relieveFromTeam clears teamId, when this.scope(caller)'s team filter would no longer match the just-relieved Coder. */
+  private async findOwnAnyTeam(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id }, include: TEAM_INCLUDE });
+    if (!user) throw new NotFoundException('Coder not found');
+    return user;
   }
 
   async export(caller: AuthUser, format: ExportFormat, query: Pick<ListCodersDto, 'search' | 'status'>) {
@@ -338,6 +389,7 @@ export class CodersService {
                 teamId,
               },
             });
+            await openMembership(tx, user.id, teamId, caller.id);
             await writeAuditLog(tx, caller, 'USER_CREATED', 'User', user.id, {
               after: { employeeId: user.employeeId, loginName: user.loginName, role: 'CODER', source: 'csv-import' },
             });

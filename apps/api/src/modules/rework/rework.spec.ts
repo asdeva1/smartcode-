@@ -148,7 +148,7 @@ describe('ReworkService', () => {
     expect(service.scope(manager)).toEqual({});
     expect(service.scope(teamLead)).toEqual({ teamId: 'team-1' });
     expect(service.scope(coder)).toEqual({ coderId: 'coder-1' });
-    expect(service.scope(auditor)).toEqual({ OR: [{ auditorId: 'aud-1' }, { project: { auditorAssignments: { some: { auditorId: 'aud-1' } } } }] });
+    expect(service.scope(auditor)).toEqual({ OR: [{ auditorId: 'aud-1' }, { project: { auditorAssignments: { some: { auditorId: 'aud-1', isActive: true } } } }] });
     expect(service.scope(vendor)).toEqual({ project: { team: { teamLead: { vendorAssignments: { some: { vendorId: 'vendor-a', isActive: true } } } } } });
     expect(() => service.scope({ ...teamLead, teamId: null })).toThrow(ForbiddenException);
   });

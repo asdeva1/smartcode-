@@ -80,8 +80,16 @@ export class AuditsService {
     if (caller.role === 'MANAGER') return chart;
     if (caller.role === 'TEAM_LEAD') return chart.project.teamId === requireTeam(caller) ? chart : null;
     if (caller.role === 'AUDITOR') {
-      const assigned = await this.prisma.auditorProjectAssignment.findUnique({
-        where: { auditorId_projectId: { auditorId: caller.id, projectId: chart.projectId } },
+      // Organization Assignment requirement section 13 - the old
+      // `@@unique([auditorId, projectId])` (and this findUnique's
+      // "auditorId_projectId" compound key) no longer exists now that
+      // unassigning is a soft-delete (see AuditorProjectAssignment in
+      // schema.prisma); a plain findFirst scoped to the current, ACTIVE
+      // assignment is the direct replacement - a Coder whose assignment
+      // was ended must not keep seeing this chart just because an OLD,
+      // now-inactive row for the same pair still exists.
+      const assigned = await this.prisma.auditorProjectAssignment.findFirst({
+        where: { auditorId: caller.id, projectId: chart.projectId, isActive: true },
       });
       if (!assigned) return null;
       // A vendor Auditor works only inside their vendor, even if an old assignment says otherwise.

@@ -265,7 +265,7 @@ describe('Auditor - Dashboard', () => {
     renderWithProviders(<AuditorDashboard />);
     expect(await screen.findByText('Pending Audits')).toBeInTheDocument();
     expect(screen.getByText('7')).toBeInTheDocument();
-    expect(fetchMock.mock.calls[0][0]).toMatch(/^\/reports\/dashboard\?today=\d{4}-\d{2}-\d{2}$/);
+    expect(fetchMock.mock.calls.map((c) => c[0])).toContainEqual(expect.stringMatching(/^\/reports\/dashboard\?today=\d{4}-\d{2}-\d{2}$/));
     await user.type(screen.getByLabelText('Quick search by Chart ID'), 'CH-9');
     await user.click(screen.getByRole('button', { name: 'Open' }));
     expect(push).toHaveBeenCalledWith('/auditor/audit-entry?chartId=CH-9');

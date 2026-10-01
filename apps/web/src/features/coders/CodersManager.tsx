@@ -11,7 +11,7 @@ import { Button, ConfirmDialog, DataTable, ErrorState, FilterBar, Input, Paginat
 import { ExportMenu } from '@/components/data/ExportMenu';
 import { CsvImportDialog } from '@/components/data/CsvImportDialog';
 import { formatDate } from '@/lib/format';
-import { useCoders, useInvalidateCodersAfterImport, useSetCoderActive } from './use-coders';
+import { useCoders, useInvalidateCodersAfterImport, useRelieveCoderFromTeam, useSetCoderActive } from './use-coders';
 import { CreateCoderDialog } from './CreateCoderDialog';
 import { EditCoderDialog } from './EditCoderDialog';
 import { CoderDetailDrawer } from './CoderDetailDrawer';
@@ -33,6 +33,12 @@ const name = (c: Coder) => c.fullName ?? c.loginName;
  * reset link is generated. Requesting a Login Name change (section 9)
  * remains Team-Lead-only - a Vendor is not authorized to request that, so
  * the Vendor Portal screen passes that one flag false.
+ *
+ * "Relieve from Team" (Organization Assignment + Auto-Visibility
+ * requirement section 1) is Team-Lead-only, enforced server-side
+ * (CodersService.relieveFromTeam rejects a Vendor caller); the Vendor
+ * Portal screen also hides the menu item itself via `allowRelieveFromTeam`
+ * so a Vendor user is never shown an action that would just 403.
  */
 export function CodersManager({
   headerActions,
@@ -40,12 +46,14 @@ export function CodersManager({
   showImportExport = true,
   allowResetPassword = true,
   allowLoginNameRequest = true,
+  allowRelieveFromTeam = true,
 }: {
   headerActions?: (actions: React.ReactNode) => React.ReactNode;
   basePath?: string;
   showImportExport?: boolean;
   allowResetPassword?: boolean;
   allowLoginNameRequest?: boolean;
+  allowRelieveFromTeam?: boolean;
 }) {
   const { showToast } = useToast();
   const [page, setPage] = React.useState(1);
@@ -59,10 +67,12 @@ export function CodersManager({
   const [menu, setMenu] = React.useState<{ el: HTMLElement; row: Coder } | null>(null);
   const [resetTarget, setResetTarget] = React.useState<RequestPasswordResetTarget | null>(null);
   const [loginNameTarget, setLoginNameTarget] = React.useState<LoginNameChangeTarget | null>(null);
+  const [relieveTarget, setRelieveTarget] = React.useState<Coder | null>(null);
 
   const filters = { search: search || undefined, status };
   const { data, isLoading, isError, refetch, isFetching } = useCoders({ page, pageSize: PAGE_SIZE, ...filters }, basePath);
   const setActive = useSetCoderActive();
+  const relieve = useRelieveCoderFromTeam(basePath);
   const invalidate = useInvalidateCodersAfterImport();
 
   const changeActive = (row: Coder, isActive: boolean) =>
@@ -73,6 +83,12 @@ export function CodersManager({
         onError: () => showToast(`Could not ${isActive ? 'activate' : 'deactivate'} this Coder.`, 'error'),
       },
     );
+
+  const relieveFromTeam = (row: Coder) =>
+    relieve.mutate(row.id, {
+      onSuccess: () => showToast(`${name(row)} has been relieved from the Team.`, 'success'),
+      onError: () => showToast(`Could not relieve ${name(row)} from the Team.`, 'error'),
+    });
 
   const actions = (
     <Stack direction="row" spacing={1}>
@@ -206,6 +222,16 @@ export function CodersManager({
             Request Login Name Change
           </MenuItem>
         )}
+        {allowRelieveFromTeam && menu?.row.team && (
+          <MenuItem
+            onClick={() => {
+              if (menu) setRelieveTarget(menu.row);
+              setMenu(null);
+            }}
+          >
+            Relieve from Team
+          </MenuItem>
+        )}
         {menu?.row.isActive ? (
           <MenuItem
             onClick={() => {
@@ -256,6 +282,18 @@ export function CodersManager({
           setConfirmTarget(null);
         }}
         onCancel={() => setConfirmTarget(null)}
+      />
+      <ConfirmDialog
+        open={!!relieveTarget}
+        title="Relieve from Team"
+        description={`${relieveTarget ? name(relieveTarget) : 'This Coder'} will no longer be an active member of ${relieveTarget?.team?.name ?? 'this Team'} and will stop receiving new Team-scoped work. Their account, production, audit, and allocation history are preserved and they can be assigned to another Team later.`}
+        confirmLabel="Relieve from Team"
+        destructive
+        onConfirm={() => {
+          if (relieveTarget) relieveFromTeam(relieveTarget);
+          setRelieveTarget(null);
+        }}
+        onCancel={() => setRelieveTarget(null)}
       />
     </>
   );

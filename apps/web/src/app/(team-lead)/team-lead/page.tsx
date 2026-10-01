@@ -2,6 +2,7 @@
 import * as React from 'react';
 import { PageHeader } from '@smartcode/ui';
 import { DashboardMetrics } from '@/components/data/DashboardMetrics';
+import { OrgContextBanner } from '@/components/data/OrgContextBanner';
 import { WelcomeAndQuickActions } from '@/components/data/QuickActions';
 import { ReworkPanel } from '@/features/rework/ReworkPanel';
 
@@ -9,6 +10,7 @@ export default function TeamLeadDashboardPage() {
   return (
     <>
       <PageHeader title="Team Lead Dashboard" description="Your team's overview" />
+      <OrgContextBanner />
       <WelcomeAndQuickActions
         actions={[
           { label: 'Manage Coders', href: '/team-lead/coders' },

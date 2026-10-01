@@ -23,6 +23,7 @@ const employee = {
   vendor: { id: 'v-1', name: 'Acme Vendor' },
   team: { id: 't-1', name: 'Team One' },
   teamLead: { id: 'tl-1', fullName: 'Tara Lead', loginName: 'tara' },
+  assignedProjects: [{ id: 'p-1', name: 'Project Centauri' }],
   createdAt: '2026-01-15T00:00:00.000Z',
 };
 

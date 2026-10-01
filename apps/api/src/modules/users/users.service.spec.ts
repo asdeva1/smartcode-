@@ -23,6 +23,10 @@ describe('UsersService.createWithRole - server-side enforcement', () => {
   let prisma: {
     auditLog: { create: jest.Mock };
     user: { findFirst: jest.Mock; create: jest.Mock };
+    // openMembership() (Organization Assignment requirement) is called for
+    // every CODER created directly onto a Team - see the "auto-assigns the
+    // caller's team" test below.
+    teamMembership: { create: jest.Mock };
   };
 
   const managerCaller: AuthUser = {
@@ -57,6 +61,7 @@ describe('UsersService.createWithRole - server-side enforcement', () => {
     prisma = {
       auditLog: { create: jest.fn().mockResolvedValue({}) },
       user: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn() },
+      teamMembership: { create: jest.fn().mockResolvedValue({}) },
     };
 
     const moduleRef = await Test.createTestingModule({

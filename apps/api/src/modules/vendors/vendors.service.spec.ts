@@ -123,7 +123,7 @@ describe('VendorsService', () => {
     it('assigns a Team Lead after validating vendor, user, duplicates and cross-vendor Auditors; logs it', async () => {
       const r = await service.assign(manager, V, 'TEAM_LEAD', 'tl-1');
       expect(prisma.vendorAssignment.create.mock.calls[0][0].data).toEqual({ vendorId: V, userId: 'tl-1', role: 'TEAM_LEAD', assignedById: 'm' });
-      expect(prisma.auditorProjectAssignment.findMany.mock.calls[0][0].where).toEqual({ projectId: { in: ['p-1'] } });
+      expect(prisma.auditorProjectAssignment.findMany.mock.calls[0][0].where).toEqual({ isActive: true, projectId: { in: ['p-1'] } });
       expect(r).toMatchObject({ assignmentId: 'asg-1', vendorId: V });
       expect(prisma.auditLog.create.mock.calls[0][0].data).toMatchObject({ action: 'VENDOR_TEAM_LEAD_ASSIGNED', entity: 'Vendor', entityId: V, after: { userId: 'tl-1', role: 'TEAM_LEAD' } });
     });

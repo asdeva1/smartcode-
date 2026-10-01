@@ -24,9 +24,9 @@ describe('vendor scope (database query builders)', () => {
 
   it('an Auditor in a vendor is limited to that vendor\'s projects; an in-house Auditor keeps the existing rule', () => {
     const inHouse: AuthUser = { ...base, id: 'a', role: 'AUDITOR' };
-    expect(auditorProjectWhere(inHouse)).toEqual({ auditorAssignments: { some: { auditorId: 'a' } } });
-    expect(auditorProjectWhere({ ...inHouse, vendorId: V })).toEqual({ auditorAssignments: { some: { auditorId: 'a' } }, ...vendorProjectWhere(V) });
-    expect(chartScope({ ...inHouse, vendorId: V })).toEqual({ project: { auditorAssignments: { some: { auditorId: 'a' } }, team: { teamLead: { vendorAssignments: inVendor } } } });
+    expect(auditorProjectWhere(inHouse)).toEqual({ auditorAssignments: { some: { auditorId: 'a', isActive: true } } });
+    expect(auditorProjectWhere({ ...inHouse, vendorId: V })).toEqual({ auditorAssignments: { some: { auditorId: 'a', isActive: true } }, ...vendorProjectWhere(V) });
+    expect(chartScope({ ...inHouse, vendorId: V })).toEqual({ project: { auditorAssignments: { some: { auditorId: 'a', isActive: true } }, team: { teamLead: { vendorAssignments: inVendor } } } });
   });
 });
 

@@ -35,6 +35,12 @@ function useInvalidateCoders() {
   return () => {
     queryClient.invalidateQueries({ queryKey: ['coders'] });
     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    // Organization Assignment + Auto-Visibility requirement section 10 -
+    // a Team/Project assignment change must invalidate/refetch the
+    // affected dashboards/directory via the existing React Query
+    // architecture, never require a manual reload.
+    queryClient.invalidateQueries({ queryKey: ['org-context'] });
+    queryClient.invalidateQueries({ queryKey: ['employees'] });
   };
 }
 
@@ -68,4 +74,20 @@ export function useSetCoderActive() {
 
 export function useInvalidateCodersAfterImport() {
   return useInvalidateCoders();
+}
+
+/**
+ * "Relieve from Team" / "Release from Team" - Organization Assignment +
+ * Auto-Visibility requirement section 1. Team-Lead-only server-side
+ * (CodersService.relieveFromTeam); basePath has no default here (unlike
+ * every other hook above) because this action is deliberately NOT
+ * exposed on the Vendor Portal's Coders screen - see CodersManager's
+ * `allowRelieveFromTeam` prop.
+ */
+export function useRelieveCoderFromTeam(basePath: string) {
+  const invalidate = useInvalidateCoders();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<Coder>(`${basePath}/${id}/relieve`, { method: 'POST' }),
+    onSuccess: () => invalidate(),
+  });
 }

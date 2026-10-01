@@ -5,7 +5,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ProjectsService } from './projects.service';
-import { CreateAuditorAssignmentDto, CreateClientDto, CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
+import { AssignProjectTeamDto, CreateAuditorAssignmentDto, CreateClientDto, CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
 
 @ApiTags('projects')
 @ApiBearerAuth()
@@ -47,6 +47,27 @@ export class ProjectsController {
   @ApiOperation({ summary: 'Manager renames a project, changes its team, or (de)activates it' })
   updateProject(@CurrentUser() caller: AuthUser, @Param('id') id: string, @Body() dto: UpdateProjectDto) {
     return this.projects.updateProject(caller, id, dto);
+  }
+
+  @Post('manager/projects/:id/team-assignment')
+  @Roles('MANAGER')
+  @ApiOperation({ summary: 'Phase 10A: assign a Project to a Team, preserving history' })
+  assignTeam(@CurrentUser() caller: AuthUser, @Param('id') id: string, @Body() dto: AssignProjectTeamDto) {
+    return this.projects.assignTeam(caller, id, dto);
+  }
+
+  @Delete('manager/projects/:id/team-assignment')
+  @Roles('MANAGER')
+  @ApiOperation({ summary: 'Phase 10A: unassign a Project\'s current Team, preserving history' })
+  unassignTeam(@CurrentUser() caller: AuthUser, @Param('id') id: string) {
+    return this.projects.unassignTeam(caller, id);
+  }
+
+  @Get('manager/projects/:id/team-assignments')
+  @Roles('MANAGER')
+  @ApiOperation({ summary: 'Phase 10A: full Project<->Team assignment history' })
+  listTeamAssignments(@CurrentUser() caller: AuthUser, @Param('id') id: string) {
+    return this.projects.listTeamAssignments(caller, id);
   }
 
   @Get('manager/auditor-assignments')

@@ -63,4 +63,13 @@ export class CodersController {
   update(@CurrentUser() caller: AuthUser, @Param('id') id: string, @Body() dto: UpdateCoderDto) {
     return this.coders.update(caller, id, dto);
   }
+
+  @Post(':id/relieve')
+  @ApiOperation({
+    summary:
+      'Relieve/Release an own-team Coder from the Team - preserves the account, all history and membership history; the Coder stops being an active Team member and stops receiving new Team-scoped work',
+  })
+  relieve(@CurrentUser() caller: AuthUser, @Param('id') id: string) {
+    return this.coders.relieveFromTeam(caller, id);
+  }
 }

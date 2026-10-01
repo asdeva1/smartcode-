@@ -2,6 +2,7 @@
 import * as React from 'react';
 import { PageHeader } from '@smartcode/ui';
 import { DashboardMetrics } from '@/components/data/DashboardMetrics';
+import { OrgContextBanner } from '@/components/data/OrgContextBanner';
 import { WelcomeAndQuickActions } from '@/components/data/QuickActions';
 import { ReworkPanel } from '@/features/rework/ReworkPanel';
 
@@ -9,6 +10,7 @@ export default function CoderDashboardPage() {
   return (
     <>
       <PageHeader title="My Dashboard" description="Your production overview" />
+      <OrgContextBanner />
       <WelcomeAndQuickActions
         actions={[
           { label: 'Add Production', href: '/coder/production/new' },

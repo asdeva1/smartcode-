@@ -4,6 +4,7 @@ import { isValidIsoDate, resolvePeriod, type AuthUser } from '@smartcode/types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { writeAuditLog } from '../../common/audit-log';
 import { PERSON_SELECT, dateRange, isUniqueViolation, personRef } from '../../common/scope';
+import { cascadeCodersOffTeam, cascadeCodersToTeam } from '../../common/team-membership';
 import {
   assertProjectAuditorsFit,
   projectVendorId,
@@ -213,7 +214,7 @@ export class VendorsService {
               select: {
                 ...PERSON_WITH_STATUS,
                 leadsTeam: { select: { id: true, name: true, _count: { select: { members: { where: { role: 'CODER', isActive: true } } } } } },
-                _count: { select: { auditorAssignments: true } },
+                _count: { select: { auditorAssignments: { where: { isActive: true } } } },
               },
             },
           },
@@ -292,7 +293,7 @@ export class VendorsService {
       await assertProjectAuditorsFit(this.prisma, user.leadsTeam?.projects.map((p) => p.id) ?? [], vendorId, 'Cannot assign this Team Lead');
     } else {
       // Every project the Auditor already audits must be one of this vendor's projects.
-      const assigned = await this.prisma.auditorProjectAssignment.findMany({ where: { auditorId: userId }, select: { project: { select: { id: true, name: true } } } });
+      const assigned = await this.prisma.auditorProjectAssignment.findMany({ where: { auditorId: userId, isActive: true }, select: { project: { select: { id: true, name: true } } } });
       const outside: string[] = [];
       for (const a of assigned) if ((await projectVendorId(this.prisma, a.project.id)) !== vendorId) outside.push(a.project.name);
       if (outside.length) {
@@ -375,9 +376,22 @@ export class VendorsService {
       });
     }
 
-    const cascaded = await this.prisma.user.updateMany({
+    const affected = await this.prisma.user.findMany({
       where: { role: 'CODER', vendorId, isActive: true },
-      data: { teamId },
+      select: { id: true, teamId: true },
+    });
+    const affectedIds = affected.map((c) => c.id);
+    // Only Coders actually MOVING onto this Team get a ledger entry -
+    // matches assignTeamLead's own "idempotent, no-op for an already
+    // correctly-placed Coder" contract, so re-running this with the same
+    // Team Lead never manufactures a spurious membership history row.
+    const movingIds = affected.filter((c) => c.teamId !== teamId).map((c) => c.id);
+    const cascaded = await this.prisma.$transaction(async (tx) => {
+      await cascadeCodersToTeam(tx, caller, movingIds, teamId!);
+      return tx.user.updateMany({
+        where: { id: { in: affectedIds } },
+        data: { teamId },
+      });
     });
 
     await writeAuditLog(this.prisma, caller, 'VENDOR_TEAM_LEAD_CODERS_CASCADED', 'Vendor', vendorId, {
@@ -397,9 +411,17 @@ export class VendorsService {
   async removeTeamLead(caller: AuthUser, vendorId: string, userId: string) {
     this.assertManager(caller);
     const result = await this.unassign(caller, vendorId, 'TEAM_LEAD', userId);
-    const detached = await this.prisma.user.updateMany({
-      where: { role: 'CODER', vendorId, isActive: true },
-      data: { teamId: null },
+    const affected = await this.prisma.user.findMany({
+      where: { role: 'CODER', vendorId, isActive: true, teamId: { not: null } },
+      select: { id: true },
+    });
+    const affectedIds = affected.map((c) => c.id);
+    const detached = await this.prisma.$transaction(async (tx) => {
+      await cascadeCodersOffTeam(tx, caller, affectedIds);
+      return tx.user.updateMany({
+        where: { id: { in: affectedIds } },
+        data: { teamId: null },
+      });
     });
     await writeAuditLog(this.prisma, caller, 'VENDOR_TEAM_LEAD_CODERS_DETACHED', 'Vendor', vendorId, {
       after: { removedTeamLeadId: userId, codersDetached: detached.count },
@@ -442,7 +464,7 @@ export class VendorsService {
         select: {
           ...PERSON_WITH_STATUS,
           auditorAssignments: {
-            where: { project: vendorProjectWhere(vendorId) },
+            where: { isActive: true, project: vendorProjectWhere(vendorId) },
             select: { project: { select: { id: true, name: true } } },
           },
         },

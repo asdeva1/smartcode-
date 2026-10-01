@@ -103,6 +103,11 @@ export function EmployeeDirectoryManager() {
               { key: 'team', header: 'Team', render: (r) => r.team?.name ?? '—' },
               { key: 'teamLead', header: 'Team Lead', render: (r) => r.teamLead?.fullName ?? r.teamLead?.loginName ?? '—' },
               {
+                key: 'assignedProjects',
+                header: 'Assigned Project(s)',
+                render: (r) => (r.assignedProjects === null || r.assignedProjects === undefined ? 'Enterprise' : r.assignedProjects.length ? r.assignedProjects.map((p) => p.name).join(', ') : '—'),
+              },
+              {
                 key: 'status',
                 header: 'Active/Inactive',
                 render: (r) => (

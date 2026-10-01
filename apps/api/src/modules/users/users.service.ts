@@ -16,6 +16,7 @@ import { requireTeam } from '../../common/scope';
 import { assertProjectAuditorsFit, requireVendor, userVendorId, vendorActiveTeamLeadTeamId } from '../../common/vendor-scope';
 import { writeAuditLog } from '../../common/audit-log';
 import { generateTempPassword } from '../../common/password';
+import { openMembership } from '../../common/team-membership';
 import { toCoderDto } from './coder.mapper';
 
 /** The user's single active vendor, shown on the Manager's Team Lead / Auditor lists. */
@@ -94,6 +95,18 @@ export class UsersService {
         ...(extra.vendorId && (targetRole === 'VENDOR' || targetRole === 'CODER') ? { vendorId: extra.vendorId } : {}),
       },
     });
+
+    // Organization Assignment / Auto-Visibility requirement section 1/9 -
+    // a Coder created directly onto a Team (Team Lead caller, or a Vendor
+    // caller whose vendor already has an active Team Lead) starts its
+    // TeamMembership history from day one, exactly like every other
+    // append-only ledger in this schema. Additive only - never blocks
+    // user creation if it fails for some unrelated reason, since it runs
+    // after the user row already exists; failures surface exactly as any
+    // other unexpected error would.
+    if (targetRole === 'CODER' && teamId) {
+      await openMembership(this.prisma, user.id, teamId, creator.id);
+    }
 
     await this.prisma.auditLog.create({
       data: {

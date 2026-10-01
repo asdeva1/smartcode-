@@ -88,6 +88,11 @@ describe('Projects: no cross-vendor Auditor assignments', () => {
         findMany: jest.fn().mockResolvedValue([{ project: { name: 'Cardio' }, auditor: { fullName: 'Ava', loginName: 'ava', vendorAssignments: [{ vendorId: V }] } }]),
       },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
+      // ProjectsService.updateProject() now wraps its work in a Prisma
+      // transaction (Phase 10 team-assignment history); tx === prisma here,
+      // matching the pattern used elsewhere, so the existing project.update
+      // stub above is reached via tx.project.update as well.
+      $transaction: jest.fn((cb: (tx: unknown) => unknown) => cb(prisma)),
     };
     service = new ProjectsService(prisma);
   });

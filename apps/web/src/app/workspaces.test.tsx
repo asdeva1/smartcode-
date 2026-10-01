@@ -169,11 +169,16 @@ describe('Team Lead workspace', () => {
   });
 
   it('dashboard shows real metrics and an error state with retry', async () => {
+    let dashboardCalls = 0;
     routeApi(fetchMock, {
-      'GET /reports/dashboard': { role: 'TEAM_LEAD', metrics: [{ key: 'activeCoders', label: 'Active Coders', value: 4 }] },
+      'GET /reports/dashboard': () => {
+        dashboardCalls += 1;
+        if (dashboardCalls === 1) throw new Error('down');
+        return { role: 'TEAM_LEAD', metrics: [{ key: 'activeCoders', label: 'Active Coders', value: 4 }] };
+      },
       'GET /rework/summary': { open: 0, inProgress: 0, resolved: 0, reaudited: 0, unread: 0, recent: [] },
+      'GET /me/context': { role: 'TEAM_LEAD', vendor: null, teams: [], projects: [], coderCount: 0, teamMembers: [] },
     });
-    fetchMock.mockRejectedValueOnce(new Error('down'));
     const user = userEvent.setup();
     renderWithProviders(<TeamLeadDashboard />);
     expect(await screen.findByText('Could not load dashboard figures.')).toBeInTheDocument();

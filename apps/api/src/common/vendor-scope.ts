@@ -95,7 +95,7 @@ export function requireVendor(caller: AuthUser): string {
  */
 export function auditorProjectWhere(caller: AuthUser): Prisma.ProjectWhereInput {
   return {
-    auditorAssignments: { some: { auditorId: caller.id } },
+    auditorAssignments: { some: { auditorId: caller.id, isActive: true } },
     ...(caller.vendorId ? vendorProjectWhere(caller.vendorId) : {}),
   };
 }
@@ -146,7 +146,7 @@ export async function assertProjectAuditorsFit(
 ): Promise<void> {
   if (projectIds.length === 0) return;
   const assignments = await db.auditorProjectAssignment.findMany({
-    where: { projectId: { in: projectIds } },
+    where: { projectId: { in: projectIds }, isActive: true },
     select: {
       project: { select: { name: true } },
       auditor: {

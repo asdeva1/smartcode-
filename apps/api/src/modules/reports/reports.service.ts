@@ -516,10 +516,10 @@ export class ReportsService {
     }
 
     // AUDITOR
-    const assigned = { project: { auditorAssignments: { some: { auditorId: caller.id } } } };
+    const assigned = { project: { auditorAssignments: { some: { auditorId: caller.id, isActive: true } } } };
     const mine = (status: Prisma.AuditEntryWhereInput['status']) => this.prisma.auditEntry.count({ where: { auditorId: caller.id, status } });
     const [projects, awaiting, inProgress, completed, review, rejected, todayCount, errors] = await Promise.all([
-      this.prisma.auditorProjectAssignment.count({ where: { auditorId: caller.id } }),
+      this.prisma.auditorProjectAssignment.count({ where: { auditorId: caller.id, isActive: true } }),
       this.prisma.productionEntry.count({ where: { isCurrent: true, status: 'COMPLETED', auditEntries: { none: {} }, chart: assigned } }),
       mine({ in: ['PENDING', 'IN_PROGRESS'] }),
       mine('COMPLETED'),

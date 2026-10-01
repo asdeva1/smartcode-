@@ -15,7 +15,10 @@ export function requireTeam(caller: AuthUser): string {
 /**
  * Row-level chart visibility (docs/09-BUSINESS-RULES.md "Chart Assignment"):
  * Manager all; Team Lead charts in their team's projects; Coder charts they
- * have submitted production against; Auditor charts in assigned projects
+ * have submitted production against OR that are actively allocated to them
+ * (Phase 10D - docs/09-BUSINESS-RULES.md section 12, so a Coder can see a
+ * MANUAL-project chart the Team Lead just allocated before any production
+ * has been entered against it); Auditor charts in assigned projects
  * (restricted to their vendor's projects when they belong to one); Vendor
  * charts in its own vendor's projects.
  */
@@ -26,7 +29,12 @@ export function chartScope(caller: AuthUser): Prisma.ChartWhereInput {
     case 'TEAM_LEAD':
       return { project: { teamId: requireTeam(caller) } };
     case 'CODER':
-      return { productionEntries: { some: { coderId: caller.id } } };
+      return {
+        OR: [
+          { productionEntries: { some: { coderId: caller.id } } },
+          { allocations: { some: { coderId: caller.id, isActive: true } } },
+        ],
+      };
     case 'AUDITOR':
       return { project: auditorProjectWhere(caller) };
     case 'VENDOR':
